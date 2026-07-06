@@ -24,7 +24,7 @@ extern char serial_number_str[13];
 #ifdef __cplusplus
 }
 
-typedef struct {
+struct SystemStats_t {
     bool fully_booted;
     uint32_t uptime; // [ms]
     uint32_t min_heap_space; // FreeRTOS heap [Bytes]
@@ -51,7 +51,7 @@ typedef struct {
 
     USBStats_t& usb = usb_stats_;
     I2CStats_t& i2c = i2c_stats_;
-} SystemStats_t;
+};
 
 struct PWMMapping_t {
     endpoint_ref_t endpoint = {0, 0};

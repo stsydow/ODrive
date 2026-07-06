@@ -232,7 +232,7 @@ def regularize_attribute(parent, name, elem, c_is_class):
         if 'values' in elem: elem['type']['values'] = elem.pop('values')
         if 'flags' in elem: elem['type']['flags'] = elem.pop('flags')
         if 'nullflag' in elem: elem['type']['nullflag'] = elem.pop('nullflag')
-    
+
     elem['name'] = name
     elem['fullname'] = join_name(parent.fullname, name)
     elem['parent'] = parent
@@ -302,14 +302,14 @@ class InterfaceElement():
         if elem is None:
             elem = {}
         assert(isinstance(elem, dict))
-        
+
         path = join_name(path, name)
         interfaces[path] = self
 
         self.name = split_name(name)[-1]
         self.fullname = path
         self.c_name = elem.get('c_name', self.fullname.replace('.', 'Intf::')) + 'Intf'
-        
+
         if not 'implements' in elem:
             elem['implements'] = []
         elif isinstance(elem['implements'], str):
@@ -421,7 +421,7 @@ def regularize_valuetype(path, name, elem):
             val += 1
         enums[path] = elem
         elem['is_enum'] = True
-    
+
     return elem
 
 def resolve_valuetype(scope, name):
@@ -431,7 +431,7 @@ def resolve_valuetype(scope, name):
     """
     if not isinstance(name, str):
         return name
-    
+
     scope = scope.split('.')
     for probe_scope in [join_name(*scope[:(len(scope)-i)]) for i in range(len(scope)+1)]:
         probe_name = join_name(probe_scope, name)
@@ -486,7 +486,7 @@ def generate_endpoint_table(intf, bindto, idx):
     cnt = 0
 
     for k, prop in intf.get_all_attributes().items():
-        property_value_type = re.findall('^fibre\.Property<([^>]*), (readonly|readwrite)>$', prop['type'].fullname)
+        property_value_type = re.findall('^fibre\\.Property<([^>]*), (readonly|readwrite)>$', prop['type'].fullname)
         #attr_bindto = join_name(bindto, bindings_map.get(join_name(intf['fullname'], k), k + ('_' if len(intf['functions']) or (intf['fullname'] in treat_as_classes) else '')))
         attr_bindto = intf.c_name + '::get_' + prop['name'] + '(' + bindto + ')'
         if len(property_value_type):
@@ -708,7 +708,7 @@ def tokenize(text, interface, interface_transform, value_type_transform, attribu
             else:
                 print('Warning: cannot resolve "{}" in {}'.format(token, intf.fullname))
                 return "`" + token + "`"
-        
+
         return attribute_transform(token, interface, intf, attr)
 
 

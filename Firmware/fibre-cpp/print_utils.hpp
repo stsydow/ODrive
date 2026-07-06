@@ -1,6 +1,7 @@
 #ifndef __FIBRE_PRINT_UTILS_HPP
 #define __FIBRE_PRINT_UTILS_HPP
 
+#include <type_traits>
 #include <string>
 #include <ostream>
 #include <fibre/bufptr.hpp>
@@ -117,7 +118,11 @@ public:
 };
 
 template<typename TStream, typename T>
-TStream& operator<<(TStream& stream, const HexArrayPrinter<T>& printer) {
+typename std::enable_if<
+    std::is_base_of<std::ostream, std::remove_reference_t<TStream>>::value,
+    TStream&
+>::type
+operator<<(TStream& stream, const HexArrayPrinter<T>& printer) {
     for (size_t pos = 0; pos < printer.length_; ++pos) {
         stream << " " << as_hex(printer.ptr_[pos]);
         if (((pos + 1) % 16) == 0)
