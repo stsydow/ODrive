@@ -1,0 +1,512 @@
+# Makefile.simple - Standalone Make build for ODrive firmware (v3 only)
+#
+# This is a faithful Make-only translation of Tupfile.lua / Tuprules.lua.
+# It replaces the tup-based build. v4 (STM32F7) boards are intentionally not
+# supported here.
+#
+# Usage:
+#   make -f Makefile.simple                       # build (board from tup.config)
+#   make -f Makefile.simple BOARD_VERSION=v3.6-56V
+#   make -f Makefile.simple flash                 # build + flash via openocd/stlink
+#   make -f Makefile.simple clean
+#
+# Configuration is read from tup.config (CONFIG_* variables) for compatibility
+# with the existing workflow, but can be overridden on the command line or via
+# the environment.
+
+# Make `all` the default goal regardless of where rule definitions appear below.
+.DEFAULT_GOAL := all
+
+# ----------------------------------------------------------------------------
+# Configuration
+# ----------------------------------------------------------------------------
+# tup.config uses the form CONFIG_<NAME>=<value>; tup strips the CONFIG_ prefix
+# when reading via getconfig(). We keep the CONFIG_ form and translate below.
+-include tup.config
+
+# Board version: command line > tup.config > error
+BOARD_VERSION ?= $(CONFIG_BOARD_VERSION)
+ifndef BOARD_VERSION
+  $(error BOARD_VERSION not specified. Set CONFIG_BOARD_VERSION in tup.config or pass BOARD_VERSION=v3.6-24V)
+endif
+
+# Supported v3 board variants (mirrors the `boards` table in Tupfile.lua).
+# Each entry is "v<minor>-<voltage>V"; major is always 3 for v3 boards.
+V3_VARIANTS := v3.1-24V v3.2-24V v3.3-24V v3.4-24V v3.4-48V v3.5-24V v3.5-48V v3.6-24V v3.6-56V
+ifeq ($(filter $(BOARD_VERSION),$(V3_VARIANTS)),)
+  $(error Unsupported board version "$(BOARD_VERSION)". Supported: $(V3_VARIANTS))
+endif
+
+# Parse "v3.6-24V" -> major=3 minor=6 voltage=24
+BV_NOPREFIX       := $(patsubst v%,%,$(BOARD_VERSION))
+HW_VERSION_MAJOR  := $(word 1,$(subst ., ,$(BV_NOPREFIX)))
+_V3_REST          := $(word 2,$(subst ., ,$(BV_NOPREFIX)))
+HW_VERSION_MINOR  := $(word 1,$(subst -, ,$(_V3_REST)))
+HW_VERSION_VOLTAGE := $(patsubst %V,%,$(word 2,$(subst -, ,$(_V3_REST))))
+
+# Build option knobs (mirror tup.config knobs). Override on command line.
+DEBUG    ?= $(CONFIG_DEBUG)
+STRICT   ?= $(CONFIG_STRICT)
+USE_LTO  ?= $(CONFIG_USE_LTO)
+NO_DRM   ?= $(CONFIG_NO_DRM)
+DOCTEST  ?= $(CONFIG_DOCTEST)
+ENABLE_DISASM ?= $(CONFIG_ENABLE_DISASM)
+# Optional serial number for the ST-Link programmer (hla_serial).
+PROGRAMMER ?=
+# Optional explicit path to the arm-none-eabi toolchain /bin directory.
+ARM_COMPILER_PATH ?= $(CONFIG_ARM_COMPILER_PATH)
+
+# ----------------------------------------------------------------------------
+# Toolchain
+# ----------------------------------------------------------------------------
+ifneq ($(strip $(ARM_COMPILER_PATH)),)
+  CCPATH := $(strip $(ARM_COMPILER_PATH))/
+else
+  CCPATH :=
+endif
+# Modern language standards, matching Tupfile.lua.
+CC      := $(CCPATH)arm-none-eabi-gcc -std=c23
+CXX     := $(CCPATH)arm-none-eabi-g++ -std=c++26
+LD      := $(CCPATH)arm-none-eabi-g++
+SIZE    := $(CCPATH)arm-none-eabi-size
+OBJCOPY := $(CCPATH)arm-none-eabi-objcopy
+OBJDUMP := $(CCPATH)arm-none-eabi-objdump
+
+# Python 3 (mirrors find_python3() in Tuprules.lua)
+ifeq ($(shell python -c "import sys; print(sys.version_info.major)" 2>/dev/null),3)
+  PY_CMD := python -B
+else
+  PY_CMD := python3 -B
+endif
+
+# ----------------------------------------------------------------------------
+# Output paths
+# ----------------------------------------------------------------------------
+BUILD_DIR  := build
+OBJ_DIR    := $(BUILD_DIR)/obj
+AUTODIR    := autogen
+FIRMWARE   := $(BUILD_DIR)/ODriveFirmware.elf
+FIRMWARE_HEX := $(BUILD_DIR)/ODriveFirmware.hex
+FIRMWARE_BIN := $(BUILD_DIR)/ODriveFirmware.bin
+FIRMWARE_MAP := $(BUILD_DIR)/ODriveFirmware.map
+
+# ----------------------------------------------------------------------------
+# Compiler flags
+# ----------------------------------------------------------------------------
+# In tup, add_pkg() accumulates ALL flags (HAL cpu/fpu flags, board -D flags,
+# fibre -D flags and every -I path) into one global CFLAGS that is applied to
+# every translation unit AND to the link step. We replicate that exactly: a
+# single CFLAGS for everything. Splitting flags per-source (as a previous
+# attempt did) silently drops objects and produces an undersized binary.
+
+CFLAGS := -D__weak="__attribute__((weak))" \
+          -D__packed="__attribute__((__packed__))" \
+          -DUSE_HAL_DRIVER
+
+CFLAGS += -mthumb -mfloat-abi=hard -Wno-psabi
+CFLAGS += -Wall -Wdouble-promotion -Wfloat-conversion -fdata-sections -ffunction-sections
+CFLAGS += -g
+CFLAGS += -DFIBRE_ENABLE_SERVER
+CFLAGS += -Wno-nonnull
+
+# STM32F4 HAL package cflags (stm32f4xx_hal_pkg)
+CFLAGS += -DARM_MATH_CM4 -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -DFPU_FPV4
+
+# Board v3 package cflags
+CFLAGS += -DSTM32F405xx -DHW_VERSION_MAJOR=3
+# Per-variant cflags from the `boards` table
+CFLAGS += -DHW_VERSION_MINOR=$(HW_VERSION_MINOR) -DHW_VERSION_VOLTAGE=$(HW_VERSION_VOLTAGE)
+
+# Fibre package cflags (get_fibre_package: enable_server=true, enable_client=false,
+# allow_heap=false, max_log_verbosity=0, default_log_verbosity=2, all backends off)
+CFLAGS += -DFIBRE_ENABLE_SERVER=1
+CFLAGS += -DFIBRE_ENABLE_CLIENT=0
+CFLAGS += -DFIBRE_ENABLE_EVENT_LOOP=0
+CFLAGS += -DFIBRE_ALLOW_HEAP=0
+CFLAGS += -DFIBRE_MAX_LOG_VERBOSITY=0
+CFLAGS += -DFIBRE_DEFAULT_LOG_VERBOSITY=2
+CFLAGS += -DFIBRE_ENABLE_LIBUSB_BACKEND=0
+CFLAGS += -DFIBRE_ENABLE_TCP_SERVER_BACKEND=0
+CFLAGS += -DFIBRE_ENABLE_TCP_CLIENT_BACKEND=0
+
+# Include directories (accumulated from all packages via add_pkg).
+# odrive_firmware_pkg
+CFLAGS += -I. -IMotorControl -Ifibre-cpp/include
+# stm32f4xx_hal_pkg
+CFLAGS += -IThirdParty/STM32F4xx_HAL_Driver/Inc
+# freertos_pkg
+CFLAGS += -IThirdParty/FreeRTOS/Source/include -IThirdParty/FreeRTOS/Source/CMSIS_RTOS
+# cmsis_pkg
+CFLAGS += -IThirdParty/CMSIS/Include -IThirdParty/CMSIS/Device/ST/STM32F4xx/Include
+# (STM32F7 CMSIS include intentionally omitted for v3-only build)
+# stm32_usb_device_library_pkg
+CFLAGS += -IThirdParty/STM32_USB_Device_Library/Core/Inc -IThirdParty/STM32_USB_Device_Library/Class/CDC/Inc
+# board_v3
+CFLAGS += -IBoard/v3/Inc -IThirdParty/FreeRTOS/Source/portable/GCC/ARM_CM4F
+
+# Optional knobs
+ifeq ($(STRICT),true)
+  CFLAGS += -Werror
+endif
+ifeq ($(NO_DRM),true)
+  CFLAGS += -DNO_DRM
+endif
+ifeq ($(DEBUG),true)
+  CFLAGS += -gdwarf-2 -Og
+else
+  CFLAGS += -O2
+endif
+ifeq ($(USE_LTO),true)
+  CFLAGS += -flto
+endif
+
+# ----------------------------------------------------------------------------
+# Linker flags
+# ----------------------------------------------------------------------------
+# Base LDFLAGS (always includes -flto as in Tupfile.lua), plus board and cmsis
+# ldflags appended by add_pkg() in the order: board, cmsis.
+LDFLAGS := -flto -lc -lm -lnosys
+LDFLAGS += -mthumb -mfloat-abi=hard -specs=nosys.specs -u _printf_float -u _scanf_float -Wl,--cref -Wl,--gc-sections
+LDFLAGS += -Wl,--undefined=uxTopUsedPriority
+# board_v3 ldflags
+LDFLAGS += -TBoard/v3/STM32F405RGTx_FLASH.ld -larm_cortexM4lf_math
+# cmsis_pkg ldflags
+LDFLAGS += -LThirdParty/CMSIS/Lib/GCC
+
+# ----------------------------------------------------------------------------
+# Source files
+# ----------------------------------------------------------------------------
+# Order/contents mirror Tupfile.lua add_pkg() calls:
+#   add_pkg(board)  -> board_v3 (which includes stm32f4xx_hal_pkg)
+#   add_pkg(freertos_pkg)
+#   add_pkg(cmsis_pkg)
+#   add_pkg(stm32_usb_device_library_pkg)
+#   add_pkg(fibre_pkg)
+#   add_pkg(odrive_firmware_pkg)
+
+# stm32f4xx_hal_pkg
+STM32F4_HAL_SRCS := \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_adc.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_adc_ex.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_can.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_cortex.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_dma.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_dma_ex.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_flash.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_flash_ex.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_flash_ramfunc.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_gpio.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_i2c.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_i2c_ex.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pcd.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pcd_ex.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pwr.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_pwr_ex.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc_ex.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_tim_ex.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_uart.c \
+	ThirdParty/STM32F4xx_HAL_Driver/Src/stm32f4xx_ll_usb.c
+
+# board_v3
+BOARD_V3_SRCS := \
+	Board/v3/startup_stm32f405xx.s \
+	ThirdParty/FreeRTOS/Source/portable/GCC/ARM_CM4F/port.c \
+	Drivers/DRV8301/drv8301.cpp \
+	Board/v3/board.cpp \
+	Board/v3/Src/stm32f4xx_hal_timebase_TIM.c \
+	Board/v3/Src/tim.c \
+	Board/v3/Src/dma.c \
+	Board/v3/Src/freertos.c \
+	Board/v3/Src/main.c \
+	Board/v3/Src/usbd_conf.c \
+	Board/v3/Src/spi.c \
+	Board/v3/Src/usart.c \
+	Board/v3/Src/usbd_cdc_if.c \
+	Board/v3/Src/adc.c \
+	Board/v3/Src/stm32f4xx_hal_msp.c \
+	Board/v3/Src/usbd_desc.c \
+	Board/v3/Src/stm32f4xx_it.c \
+	Board/v3/Src/usb_device.c \
+	Board/v3/Src/can.c \
+	Board/v3/Src/system_stm32f4xx.c \
+	Board/v3/Src/gpio.c \
+	Board/v3/Src/i2c.c
+
+# freertos_pkg
+FREERTOS_SRCS := \
+	ThirdParty/FreeRTOS/Source/croutine.c \
+	ThirdParty/FreeRTOS/Source/event_groups.c \
+	ThirdParty/FreeRTOS/Source/list.c \
+	ThirdParty/FreeRTOS/Source/queue.c \
+	ThirdParty/FreeRTOS/Source/stream_buffer.c \
+	ThirdParty/FreeRTOS/Source/tasks.c \
+	ThirdParty/FreeRTOS/Source/timers.c \
+	ThirdParty/FreeRTOS/Source/CMSIS_RTOS/cmsis_os.c \
+	ThirdParty/FreeRTOS/Source/portable/MemMang/heap_4.c
+
+# stm32_usb_device_library_pkg
+USB_DEV_SRCS := \
+	ThirdParty/STM32_USB_Device_Library/Core/Src/usbd_core.c \
+	ThirdParty/STM32_USB_Device_Library/Core/Src/usbd_ctlreq.c \
+	ThirdParty/STM32_USB_Device_Library/Core/Src/usbd_ioreq.c \
+	ThirdParty/STM32_USB_Device_Library/Class/CDC/Src/usbd_cdc.c
+
+# fibre_pkg (enable_server=true, enable_client=false, max_log_verbosity=0)
+#   -> fibre.cpp, channel_discoverer.cpp, legacy_protocol.cpp
+#   (logging.cpp is skipped because max_log_verbosity == 0)
+FIBRE_SRCS := \
+	fibre-cpp/fibre.cpp \
+	fibre-cpp/channel_discoverer.cpp \
+	fibre-cpp/legacy_protocol.cpp
+
+# odrive_firmware_pkg
+ODRIVE_FW_SRCS := \
+	syscalls.c \
+	MotorControl/utils.cpp \
+	MotorControl/arm_sin_f32.c \
+	MotorControl/arm_cos_f32.c \
+	MotorControl/low_level.cpp \
+	MotorControl/axis.cpp \
+	MotorControl/motor.cpp \
+	MotorControl/thermistor.cpp \
+	MotorControl/encoder.cpp \
+	MotorControl/endstop.cpp \
+	MotorControl/acim_estimator.cpp \
+	MotorControl/mechanical_brake.cpp \
+	MotorControl/controller.cpp \
+	MotorControl/foc.cpp \
+	MotorControl/open_loop_controller.cpp \
+	MotorControl/oscilloscope.cpp \
+	MotorControl/sensorless_estimator.cpp \
+	MotorControl/trapTraj.cpp \
+	MotorControl/pwm_input.cpp \
+	MotorControl/main.cpp \
+	Drivers/STM32/stm32_system.cpp \
+	Drivers/STM32/stm32_gpio.cpp \
+	Drivers/STM32/stm32_nvm.c \
+	Drivers/STM32/stm32_spi_arbiter.cpp \
+	communication/can/can_simple.cpp \
+	communication/can/odrive_can.cpp \
+	communication/communication.cpp \
+	communication/ascii_protocol.cpp \
+	communication/interface_uart.cpp \
+	communication/interface_usb.cpp \
+	communication/interface_i2c.cpp \
+	FreeRTOS-openocd.c \
+	$(AUTODIR)/version.c
+
+ALL_SRCS := \
+	$(STM32F4_HAL_SRCS) \
+	$(BOARD_V3_SRCS) \
+	$(FREERTOS_SRCS) \
+	$(USB_DEV_SRCS) \
+	$(FIBRE_SRCS) \
+	$(ODRIVE_FW_SRCS)
+
+# Object file naming mirrors Tupfile.lua:
+#   build/obj/<src with '/' -> '_' and '.' removed>.o
+src2obj = $(OBJ_DIR)/$(subst .,,$(subst /,_,$(1))).o
+ALL_OBJS := $(foreach s,$(ALL_SRCS),$(call src2obj,$(s)))
+
+# ----------------------------------------------------------------------------
+# Autogen: interface headers from odrive-interface.yaml + version.c
+# ----------------------------------------------------------------------------
+# root_interface for board_v3 is "ODrive3" (Tupfile.lua: board.include[1].root_interface)
+ROOT_INTERFACE := ODrive3
+
+AUTOGEN_HDRS := \
+	$(AUTODIR)/interfaces.hpp \
+	$(AUTODIR)/function_stubs.hpp \
+	$(AUTODIR)/endpoints.hpp \
+	$(AUTODIR)/type_info.hpp
+
+# version.c is generated by ../tools/odrive/version.py (lives outside Firmware/).
+# TODO: that script is part of the odrive/tools checkout and is not present in
+# this tree. If it is missing we write a stub defining the four version symbols
+# the firmware links against, so the build can still proceed.
+VERSION_PY ?= ../tools/odrive/version.py
+# Only declare the script as a make prerequisite when it actually exists, so a
+# missing out-of-tree tool does not halt the build.
+VERSION_PY_DEP := $(if $(wildcard $(VERSION_PY)),$(VERSION_PY))
+
+$(AUTODIR)/version.c: $(VERSION_PY_DEP)
+	@mkdir -p $(@D)
+	@if [ -f "$(VERSION_PY)" ]; then \
+	  $(PY_CMD) $(VERSION_PY) --output $@; \
+	else \
+	  { echo '/* TODO: $(VERSION_PY) not found; wrote stub version info. */'; \
+	    echo 'const unsigned char fw_version_major_ = 0;'; \
+	    echo 'const unsigned char fw_version_minor_ = 0;'; \
+	    echo 'const unsigned char fw_version_revision_ = 0;'; \
+	    echo 'const unsigned char fw_version_unreleased_ = 1;'; } > $@; \
+	  echo "WARNING: $(VERSION_PY) not found; wrote stub $@"; \
+	fi
+
+# Pattern-less, per-source compile rules. Using a single global CFLAGS (see note
+# above) matches tup exactly and avoids the undersized-binary bug.
+define COMPILE_RULE
+$(call src2obj,$(1)): $(1) $(AUTOGEN_HDRS)
+	@mkdir -p $$(@D)
+	$$(if $(filter %.c,$(1)),$$(CC),$$(if $(filter %.cpp,$(1)),$$(CXX),$$(CC) -x assembler-with-cpp)) -c $$< $$(CFLAGS) -o $$@
+endef
+
+$(foreach s,$(ALL_SRCS),$(eval $(call COMPILE_RULE,$(s))))
+
+# Autogen header generation
+$(AUTODIR)/interfaces.hpp: fibre-cpp/interfaces_template.j2 odrive-interface.yaml interface_generator_stub.py
+	@mkdir -p $(@D)
+	$(PY_CMD) interface_generator_stub.py --definitions odrive-interface.yaml --template $< --output $@
+
+$(AUTODIR)/function_stubs.hpp: fibre-cpp/function_stubs_template.j2 odrive-interface.yaml interface_generator_stub.py
+	@mkdir -p $(@D)
+	$(PY_CMD) interface_generator_stub.py --definitions odrive-interface.yaml --template $< --output $@
+
+$(AUTODIR)/endpoints.hpp: fibre-cpp/endpoints_template.j2 odrive-interface.yaml interface_generator_stub.py
+	@mkdir -p $(@D)
+	$(PY_CMD) interface_generator_stub.py --definitions odrive-interface.yaml --generate-endpoints $(ROOT_INTERFACE) --template $< --output $@
+
+$(AUTODIR)/type_info.hpp: fibre-cpp/type_info_template.j2 odrive-interface.yaml interface_generator_stub.py
+	@mkdir -p $(@D)
+	$(PY_CMD) interface_generator_stub.py --definitions odrive-interface.yaml --template $< --output $@
+
+# ----------------------------------------------------------------------------
+# Link and image conversion
+# ----------------------------------------------------------------------------
+.PHONY: all clean size disasm
+
+all: $(FIRMWARE) $(FIRMWARE_HEX) $(FIRMWARE_BIN)
+
+$(FIRMWARE): $(ALL_OBJS)
+	@mkdir -p $(@D)
+	$(LD) $^ $(CFLAGS) $(LDFLAGS) -Wl,-Map=$(FIRMWARE_MAP) -o $@
+	$(SIZE) $@
+
+$(FIRMWARE_HEX): $(FIRMWARE)
+	$(OBJCOPY) -O ihex $< $@
+
+$(FIRMWARE_BIN): $(FIRMWARE)
+	$(OBJCOPY) -O binary -S $< $@
+
+size: $(FIRMWARE)
+	$(SIZE) $(FIRMWARE)
+
+# Optional disassembly (matches Tupfile.lua ENABLE_DISASM)
+ifeq ($(ENABLE_DISASM),true)
+DISASM := $(BUILD_DIR)/ODriveFirmware.asm
+all: $(DISASM)
+$(DISASM): $(FIRMWARE)
+	$(OBJDUMP) $< -dSC > $@
+endif
+
+# ----------------------------------------------------------------------------
+# Clean
+# ----------------------------------------------------------------------------
+clean:
+	rm -rf $(BUILD_DIR)
+
+# ----------------------------------------------------------------------------
+# Programming / debug (stlink2 + openocd) - mirrors original Makefile
+# ----------------------------------------------------------------------------
+OPENOCD := openocd -f interface/stlink-v2.cfg \
+	$(if $(PROGRAMMER),-c 'hla_serial $(PROGRAMMER)',) \
+	-f target/stm32f4x.cfg -c init
+GDB := arm-none-eabi-gdb --ex 'target extended-remote | openocd -f "interface/stlink-v2.cfg" \
+	-f "target/stm32f4x.cfg" -c "gdb_port pipe; log_output openocd.log"' \
+	--ex 'monitor reset halt'
+
+.PHONY: flash flash-stlink2 gdb gdb-stlink2 erase erase-stlink2 unlock unlock-stlink2 dfu
+
+flash-stlink2: all
+	$(OPENOCD) \
+		-c 'reset halt' \
+		-c 'flash write_image erase $(FIRMWARE)' \
+		-c 'reset run' \
+		-c exit
+
+gdb-stlink2:
+	$(GDB) $(FIRMWARE)
+
+erase-stlink2:
+	$(OPENOCD) -c 'reset halt' -c 'flash erase_sector 0 0 last' -c exit
+
+unlock-stlink2:
+	$(OPENOCD) -c 'reset halt' -c 'stm32f2x unlock 0'
+
+# dfu uses odrivetool from the odrive/tools checkout.
+# TODO: ../tools/odrivetool is not present in this tree.
+dfu: all
+	$(PY_CMD) ../tools/odrivetool $(if $(SERIAL_NUMBER),--serial-number $(SERIAL_NUMBER),) dfu $(FIRMWARE_HEX)
+
+flash: flash-stlink2
+gdb: gdb-stlink2
+erase: erase-stlink2
+unlock: unlock-stlink2
+
+# Black Magic Probe support (from original Makefile). Requires BMP_PORT.
+# TODO: untested in this environment.
+.PHONY: flash-bmp gdb-bmp
+flash-bmp: all
+	arm-none-eabi-gdb --ex 'target extended-remote $(BMP_PORT)' \
+		--ex 'monitor swdp_scan' --ex 'attach 1' --ex 'load' \
+		--ex 'detach' --ex 'quit' $(FIRMWARE)
+
+gdb-bmp: all
+	arm-none-eabi-gdb --ex 'target extended-remote /dev/stlink' \
+		--ex 'monitor swdp_scan' --ex 'attach 1' --ex 'load' $(FIRMWARE)
+
+# ----------------------------------------------------------------------------
+# Doctest (host-side unit tests) - mirrors Tupfile.lua DOCTEST branch
+# ----------------------------------------------------------------------------
+# Builds Tests/*.cpp with the host g++ and runs the test runner.
+ifeq ($(DOCTEST),true)
+TEST_INCLUDES := -I. -IMotorControl -Ifibre-cpp/include -IDrivers/DRV8301 -Idoctest
+TEST_OBJS := $(patsubst Tests/%.cpp,Tests/bin/%.o,$(wildcard Tests/*.cpp))
+TEST_RUNNER := Tests/test_runner.exe
+
+.PHONY: test
+all: $(TEST_RUNNER)
+
+Tests/bin/%.o: Tests/%.cpp
+	@mkdir -p $(@D)
+	g++ -O3 -std=c++17 $(TEST_INCLUDES) -c $< -o $@
+
+$(TEST_RUNNER): $(TEST_OBJS)
+	g++ $^ -o $@
+
+test: $(TEST_RUNNER)
+	./$(TEST_RUNNER)
+endif
+
+# ----------------------------------------------------------------------------
+# Auxiliary host-side artifacts (best-effort, with TODOs)
+# ----------------------------------------------------------------------------
+# The original Makefile's `all` target also regenerated out-of-tree files that
+# live in ../tools and ../Arduino. Those checkouts are not present here, so these
+# are not wired into `all`. Re-enable when the surrounding odrive repo is
+# available.
+#
+# TODO: regenerate ../tools/odrive/enums.py from odrive-interface.yaml
+#   $(PY_CMD) interface_generator_stub.py --definitions odrive-interface.yaml \
+#       --template ../tools/enums_template.j2 --output ../tools/odrive/enums.py
+#
+# TODO: regenerate ../Arduino/ODriveArduino/ODriveEnums.h
+#   $(PY_CMD) interface_generator_stub.py --definitions odrive-interface.yaml \
+#       --template ../tools/arduino_enums_template.j2 --output ../Arduino/ODriveArduino/ODriveEnums.h
+#
+# TODO: build CAN DBC via ../tools/create_can_dbc.py
+#   cd ../tools/ && $(PY_CMD) create_can_dbc.py
+#
+# TODO: copy libfibre shared objects into ../tools/odrive/pyfibre/fibre/ when
+#       built (see libfibre-* docker targets in original Makefile).
+
+.PHONY: libfibre-linux-armhf libfibre-all
+# TODO: libfibre cross-builds require the `fibre-compiler` docker image and
+#       write outside the Firmware tree. Not implemented here.
+libfibre-linux-armhf:
+	@echo "TODO: libfibre-linux-armhf requires the fibre-compiler docker image; see original Makefile."
+libfibre-all:
+	@echo "TODO: libfibre-all requires the fibre-compiler docker image; see original Makefile."
