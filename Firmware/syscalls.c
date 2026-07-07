@@ -6,14 +6,25 @@
 */
 
 #include <sys/unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <errno.h>
 #include <board.h>
 
+// Minimal syscall stubs. The firmware only does output (via _write, defined in
+// communication.cpp) and heap growth (_sbrk, below). These remaining POSIX
+// hooks are not supported on bare metal; we define them explicitly so the
+// behavior is predictable (fail with ENOSYS) instead of pulling in newlib's
+// warning-emitting nosys stubs. Return values mirror libnosys exactly to keep
+// stdio behavior unchanged: -1/ENOSYS for everything, _isatty returns 0.
 
-//int _read(int file, char *data, int len) {}
-//int _close(int file) {}
-//int _lseek(int file, int ptr, int dir) {}
-//int _fstat(int file, struct stat *st) {}
-//int _isatty(int file) {}
+int _close(int file) { (void)file; errno = ENOSYS; return -1; }
+int _fstat(int file, struct stat *st) { (void)file; (void)st; errno = ENOSYS; return -1; }
+int _isatty(int file) { (void)file; errno = ENOSYS; return 0; }
+int _lseek(int file, int ptr, int dir) { (void)file; (void)ptr; (void)dir; errno = ENOSYS; return -1; }
+int _read(int file, char *data, int len) { (void)file; (void)data; (void)len; errno = ENOSYS; return -1; }
+int _kill(int pid, int sig) { (void)pid; (void)sig; errno = ENOSYS; return -1; }
+pid_t _getpid(void) { errno = ENOSYS; return -1; }
 
 extern char _end; // provided by the linker script: it's end of statically allocated section, which is where the heap starts.
 extern char _heap_end_max; // provided by the linker script
