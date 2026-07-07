@@ -4,13 +4,21 @@
 #include <stdlib.h>
 #include <algorithm>
 #include <cstring>
+#include <cstddef>
 
 #pragma GCC push_options
 #pragma GCC optimize ("s")
 
 class TypeInfo;
 class Introspectable;
-using introspectable_storage_t = std::aligned_storage<4 * sizeof(uintptr_t), sizeof(uintptr_t)>::type;
+
+// Replaces std::aligned_storage (deprecated in C++23). Opaque storage for
+// trivially-copyable small objects (pointers or on-demand Property<...>).
+// The struct's address equals its data member's address, so reinterpret casts
+// like *(T*)&storage remain valid.
+struct introspectable_storage_t {
+    alignas(sizeof(uintptr_t)) std::byte data[4 * sizeof(uintptr_t)];
+};
 
 struct PropertyInfo {
     const char * name;

@@ -93,7 +93,7 @@ odrive_firmware_pkg = {
         'Drivers/STM32/stm32_nvm.c',
         'Drivers/STM32/stm32_spi_arbiter.cpp',
         'communication/can/can_simple.cpp',
-        'communication/can/odrive_can.cpp',    
+        'communication/can/odrive_can.cpp',
         'communication/communication.cpp',
         'communication/ascii_protocol.cpp',
         'communication/interface_uart.cpp',
@@ -335,8 +335,8 @@ else
     CCPATH = CCPATH..'/'
 end
 
-CC=CCPATH..'arm-none-eabi-gcc -std=c99'
-CXX=CCPATH..'arm-none-eabi-g++ -std=c++17 -Wno-register'
+CC=CCPATH..'arm-none-eabi-gcc -std=c23'
+CXX=CCPATH..'arm-none-eabi-g++ -std=c++26'
 LINKER=CCPATH..'arm-none-eabi-g++'
 
 -- C-specific flags
@@ -370,7 +370,7 @@ elseif boards[boardversion] == nil then
 end
 board = boards[boardversion]
 
--- --not 
+-- --not
 -- TODO: remove this setting
 if tup.getconfig("USB_PROTOCOL") ~= "native" and tup.getconfig("USB_PROTOCOL") ~= "" then
     error("CONFIG_USB_PROTOCOL is deprecated")

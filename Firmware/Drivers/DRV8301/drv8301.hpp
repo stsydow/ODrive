@@ -46,7 +46,7 @@ public:
      * init().
      */
     bool config(float requested_gain, float* actual_gain);
-    
+
     /**
      * @brief Initializes the gate driver to the configuration prepared with
      * config().
@@ -89,16 +89,20 @@ public:
     }
 
 private:
+    // DRV8301 SPI control word layout: bit15 = R/W (1=read), bits13:11 = reg addr, bits10:0 = data.
+    // The enum constants hold the logical field values; build_ctrl_word() shifts
+    // them into place (shifting also promotes the enum to int, which avoids the
+    // "bitwise op between different enumeration types" warning).
     enum CtrlMode_e {
-        DRV8301_CtrlMode_Read = 1 << 15,   //!< Read Mode
-        DRV8301_CtrlMode_Write = 0 << 15   //!< Write Mode
+        DRV8301_CtrlMode_Read = 1,   //!< Read Mode
+        DRV8301_CtrlMode_Write = 0   //!< Write Mode
     };
 
     enum RegName_e {
-        kRegNameStatus1  = 0 << 11,  //!< Status Register 1
-        kRegNameStatus2  = 1 << 11,  //!< Status Register 2
-        kRegNameControl1 = 2 << 11,  //!< Control Register 1
-        kRegNameControl2 = 3 << 11   //!< Control Register 2
+        kRegNameStatus1  = 0,  //!< Status Register 1
+        kRegNameStatus2  = 1,  //!< Status Register 2
+        kRegNameControl1 = 2,  //!< Control Register 1
+        kRegNameControl2 = 3   //!< Control Register 2
     };
 
     struct RegisterFile {
@@ -109,7 +113,7 @@ private:
     static inline uint16_t build_ctrl_word(const CtrlMode_e ctrlMode,
                                            const RegName_e regName,
                                            const uint16_t data) {
-        return ctrlMode | regName | (data & 0x07FF);
+        return (ctrlMode << 15) | (regName << 11) | (data & 0x07FF);
     }
 
     /** @brief Reads data from a DRV8301 register */

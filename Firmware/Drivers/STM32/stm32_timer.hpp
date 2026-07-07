@@ -10,7 +10,7 @@ public:
     /**
      * @brief Starts multiple timers deterministically and synchronously from the
      * specified offset.
-     * 
+     *
      * All timers are atomically (*) put into the following state (regardless of
      * their previous state/configuration):
      *  - TIMx_CNT will be initialized according to the corresponding counter[i] parameter.
@@ -19,14 +19,14 @@ public:
      *  - The prescaler counter is reset.
      *  - Update interrupts are disabled.
      *  - The counter put into running state.
-     * 
+     *
      * This function is implemented by generating an update event on all selected timers.
      * That means as a side effect all things that are connected to the update event
      * except the interrupt routine itself (i.e. ADCs, DMAs, slave timers, etc) will
      * be triggered.
-     * 
+     *
      * Also you probably want to disable any connected PWM outputs to prevent glitches.
-     * 
+     *
      * (*) Best-effort atomically. There will be skew of a handful of clock cycles
      *     but it's always the same given the compiler version and configuration.
      */
@@ -58,8 +58,8 @@ private:
             htim->Instance->CNT = counters[i];
         }
 
-        register volatile uint32_t* cr_addr[I];
-        register uint32_t cr_val[I];
+        volatile uint32_t* cr_addr[I];
+        uint32_t cr_val[I];
         for (size_t i = 0; i < I; ++i) {
             cr_addr[i] = &timers[i]->Instance->CR1;
             cr_val[i] = timers[i]->Instance->CR1 | TIM_CR1_CEN;

@@ -170,7 +170,7 @@ int is_in_the_future(uint32_t time_ms) {
 
 // @brief: Returns number of microseconds since system startup
 uint32_t micros(void) {
-    register uint32_t ms, cycle_cnt;
+    uint32_t ms, cycle_cnt;
     do {
         ms = HAL_GetTick();
         cycle_cnt = TIM_TIME_BASE->CNT;
