@@ -90,11 +90,11 @@ struct BoardConfig_t {
      * If enabled, if the measured DC voltage exceeds `dc_bus_overvoltage_ramp_start`,
      * the ODrive will sink more power than usual into the the brake resistor
      * in an attempt to bring the voltage down again.
-     * 
+     *
      * The brake duty cycle is increased by the following amount:
      *  vbus_voltage == dc_bus_overvoltage_ramp_start  =>  brake_duty_cycle += 0%
      *  vbus_voltage == dc_bus_overvoltage_ramp_end  =>  brake_duty_cycle += 100%
-     * 
+     *
      * Remarks:
      *  - This feature is active even when all motors are disarmed.
      *  - This feature is disabled if `brake_resistance` is non-positive.
@@ -243,7 +243,8 @@ public:
     uint32_t n_evt_control_loop_ = 0;
     bool task_timers_armed_ = false;
     TaskTimes task_times_;
-    const bool otp_valid_ = ((uint8_t*)FLASH_OTP_BASE)[0] != 0xff;
+    const bool otp_valid_ = true; // we don't care - just used to check genuine boards
+    // const bool otp_valid_ = ((uint8_t*)FLASH_OTP_BASE)[0] != 0xff;
 };
 
 extern ODrive odrv; // defined in main.cpp

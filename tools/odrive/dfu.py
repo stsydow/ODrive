@@ -156,7 +156,7 @@ class FirmwareFromGithub(Firmware):
         self.hex = None
         # no technical reason to fetch this - just interesting
         self.download_count = asset_json['download_count']
-    
+
     def get_as_hex(self):
         """
         Returns the content of the firmware in as a binary array in Intel Hex format
@@ -182,7 +182,7 @@ def get_all_github_firmwares():
     if response.status_code != 200:
         raise Exception("could not fetch releases")
     response_json = response.json()
-    
+
     for release_json in response_json:
         for asset_json in release_json['assets']:
             try:
@@ -231,7 +231,7 @@ def put_into_dfu_mode(device, cancellation_token):
               "You can also flash the firmware using STLink (`make flash`)"
               .format(device.serial_number))
         return
-        
+
     print("Putting device {:08X} into DFU mode...".format(device.serial_number))
     try:
         device.enter_dfu_mode()
@@ -264,6 +264,7 @@ def get_hw_version_in_dfu_mode(dfudev):
     """
     otp_sector = [s for s in dfudev.sectors if s['name'] == 'OTP Memory' and s['addr'] == 0x1fff7800][0]
     otp_data = dfudev.read_sector(otp_sector)
+
     if otp_data[0] == 0:
         otp_data = otp_data[16:]
     if otp_data[0] == 0xfe:
@@ -392,8 +393,14 @@ def update_device(device, firmware, logger, cancellation_token):
         find_odrive_cancellation_token.set()
         dfudev = DfuDevice(stm_device)
 
-    hw_version = get_hw_version_in_dfu_mode(dfudev)
-    if hw_version is None:
+    # Read hardware version from OTP memory.
+    # On some boards (e.g. clones) the OTP is not programmed, so this read can
+    # fail even though we already know the hw_version from the running firmware.
+    # Only overwrite the known hw_version if the OTP read succeeds.
+    otp_hw_version = get_hw_version_in_dfu_mode(dfudev)
+    if otp_hw_version is not None:
+        hw_version = otp_hw_version
+    if hw_version == (0, 0, 0) or hw_version is None:
         logger.error("Could not determine hardware version. Flashing precompiled "
                      "firmware could lead to unexpected results. Please use an "
                      "STLink/2 to force-update the firmware anyway. Refer to "
@@ -471,12 +478,12 @@ def update_device(device, firmware, logger, cancellation_token):
             temp_config_filename = odrive.configuration.get_temp_config_filename(device)
             odrive.configuration.restore_config(device, None, logger)
             os.remove(temp_config_filename)
-        
+
         logger.success("Device firmware update successful.")
     else:
         logger.success("Firmware upload successful.")
         logger.info("To complete the firmware update, set the DFU switch to \"RUN\" and power cycle the board.")
-    
+
 
 def launch_dfu(args, logger, cancellation_token):
     """
@@ -498,14 +505,14 @@ def launch_dfu(args, logger, cancellation_token):
     t = threading.Thread(target=find_device_in_dfu_mode_thread)
     t.daemon = True
     t.start()
-    
+
 
     # Scan for ODrives not in DFU mode
     # We only scan on USB because DFU is only implemented over USB
     devices[1] = odrive.find_any(odrive.default_usb_search_path, serial_number,
         find_odrive_cancellation_token)
     find_odrive_cancellation_token.set()
-    
+
     device = devices[0] or devices[1]
     firmware = FirmwareFromFile(args.file) if args.file else None
 
@@ -528,5 +535,3 @@ def launch_dfu(args, logger, cancellation_token):
 # < 00009fc0  9e 46 70 47 00 00 00 00  52 20 96 3c 46 76 50 76  |.FpG....R .<FvPv|
 # ---
 # > 00009fc0  9e 46 70 47 ff ff ff ff  52 20 96 3c 46 76 50 76  |.FpG....R .<FvPv|
-
-
