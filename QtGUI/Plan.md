@@ -1,95 +1,73 @@
-# QtGUI — Development Plan & Feature Roadmap
+# QtGUI — Development Plan
 
-## General Context
+A lightweight native desktop GUI for the ODrive brushless motor controller,
+focused on practical control of a single axis (Axis 0). This document is
+self-contained: all hardware context, configuration baselines, and design
+decisions are included.
 
-**Project:** ODrive open-source brushless motor controller (madcowswe/ODrive)
-**QtGUI role:** A lightweight native desktop GUI alternative to the Vue.js/Electron web GUI.
-The web GUI is feature-rich but "wants too much at the same time" — the QtGUI should
-be more focused and practical.
+---
 
-**Target user:** The developer (self) first, potentially published later.
+## 1. Hardware & Firmware Context
 
-### Hardware & Firmware
+### Machine
 
 | Item | Detail |
 |------|--------|
 | **Board** | ODESC v4.2 (STM32F405, ODrive v3.6-compatible clone) |
-| **Firmware** | Stock ODrive from THIS repo (v0.5.6 series), one-line mod: `otp_valid_ = true` in `Firmware/MotorControl/odrive_main.h:246` (forces the "genuine board" OTP check to pass on the clone) |
-| **Motor** | ACT 42BLF03 — 42mm BLDC, 24V, 78W, **continuous 3.25A** / peak 18A, 4000 RPM, **hall sensors only** (no encoder) |
-| **Belt ratio** | ~3.8:1 motor:handwheel (approx, but belt slips — no reliable SPM calibration without a sensor) |
-| **Brake resistor** | 2Ω (as delivered with board) |
-| **PSU** | 24V / 8.3A (~200W) |
-| **Machine** | Pfaff 130 sewing machine, belt-driven on original mount. Mechanical clutch present but only used for maintenance (motor drives belt directly during stitching) |
-| **Future input** | Custom foot pedal (reflex optocoupler, 0–3.3V / 0–5V) with custom response curve |
+| **Firmware** | Stock ODrive from this repo (v0.5.6 series), one-line mod: `otp_valid_ = true` in `Firmware/MotorControl/odrive_main.h:246` |
+| **Motor** | ACT 42BLF03 — 42mm BLDC, 24V, **hall sensors only** (no encoder) |
+| **Belt ratio** | ~3.8:1 motor:handwheel (belt slips — **no reliable ratio or SPM without a sensor** — dropped from scope) |
+| **Brake resistor** | 2 Ω (as delivered with board) |
+| **PSU** | 24 V / 8.3 A (~200 W) |
+| **Machine** | Pfaff 130 sewing machine, belt-driven. Mechanical clutch present (must be disengaged for calibration — belt load causes calibration to fail) |
+| **Future input** | Custom foot pedal (reflex optocoupler, 0–3.3 V / 0–5 V) with custom response curve |
 
-### Key Technical Facts (verified from firmware)
+### Hall Sensor Resolution (verified from firmware)
 
-**Hall sensor resolution:** In `ENCODER_MODE_HALL`, ODrive produces **6 discrete states per
-electrical revolution** (60° electrical each). Effective encoder CPR = `6 × pole_pairs`.
+In `ENCODER_MODE_HALL`, ODrive produces **6 discrete states per electrical
+revolution** (60° electrical each). Effective encoder CPR = `6 × pole_pairs`.
 
-**Pole count resolved:** The saved config has `motor.config.pole_pairs = 8` and
-`encoder.config.cpr = 48`. Since 6 × 8 = 48, this is consistent. The ACT 42BLF03
-datasheet says "8 poles" but the working config uses 8 pole pairs. The motor
-effectively has **8 pole pairs (16 physical poles), CPR = 48.**
+The working config has `motor.config.pole_pairs = 8` and `encoder.config.cpr = 48`
+(6 × 8 = 48). The ACT 42BLF03 datasheet lists "8 poles" — this corresponds to
+**8 pole pairs (16 physical poles)** in the ODrive config, which is correct.
 
-**Low-speed hall behavior:** Position is tracked by a PLL that interpolates between the
-48 hall edges using `vel_estimate`. At very low speed the estimator jitters and the code
-even has a `snap_to_zero_vel` branch that forces velocity to exactly 0 below a threshold.
-This causes the **vibration and cogging** the user observes.
+**Low-speed behavior:** The PLL interpolates between hall edges using `vel_estimate`.
+Below a threshold, the `snap_to_zero_vel` branch forces velocity to exactly 0,
+causing the vibration and cogging observed at low speed.
 
-**Feed-forward support in ODrive:**
-- `controller.config.inertia` [N·m/(turn/s²)] — used by `INPUT_MODE_VEL_RAMP`, `TRAP_TRAJ`, `POS_FILTER`
-- `input_vel` in position mode = velocity feed-forward; `input_torque` in velocity/position mode = torque feed-forward
-- **There is NO built-in friction feed-forward parameter.** Friction compensation must be applied as a torque offset (to `input_torque`).
+### Known Good Configuration Baseline
 
-**Current & power management:** The PSU is 24V/8.3A but the controller has capacitors
-that decouple supply current from motor coil current. `dc_max_positive_current = 8.3`
-(the bus limit) is the real supply-side protection. Motor current (`current_lim`)
-is a different thing. The PSU has circuit protection — the goal is to not trigger it.
-The motor has NO temp sensor — the continuous current rating is its thermal protection,
-so keeping `current_lim` sensible is important. The GUI should monitor `dc_bus_voltage`,
-`ibus`, FET temp, and `dc_max_positive_current` rather than a naive current sum.
+This is the saved working config (`sew_config`, Axis 0). The plan uses this as
+the baseline — any deviation during development is intentional and documented.
 
----
+See **Annex A** for the full parameter table. Key highlights:
 
-## Current State (August 2025)
+| Area | Key values |
+|------|-----------|
+| **Motor** | `pole_pairs = 8`, `motor_type = HIGH_CURRENT`, `current_lim = 5.0 A` (compromise, see Annex B), torque constant + phase R/L calibrated |
+| **Encoder** | `mode = HALL`, `cpr = 48`, hall polarity + phase calibrated, `pre_calibrated = true`, `bandwidth = 100` |
+| **Controller** | `control_mode = VELOCITY`, `vel_gain = 0.0346`, `vel_integrator_gain = 0.173`, `vel_integrator_limit = 0.188` (rated continuous torque), `vel_limit = 70`, `inertia = 0` |
+| **Input mode** | `input_mode = VEL_RAMP (2)` — smooth ramps for sewing machine |
+| **System** | `brake_resistance = 2 Ω`, `dc_max_positive_current = 8.3 A`, overvoltage trip 26.5 V |
+| **Thermistors** | FET monitored, motor thermistor disabled (continuous rating is the protection) |
 
-### What Exists
+### Current State (GUI)
 
-A single-file PySide6 GUI (`main.py`, ~900 lines) focused on **Axis 0 velocity control**:
+A single-file PySide6 GUI (`main.py`, ~805 lines) focused on Axis 0 velocity
+control. See `ARCHITECTURE.md` for full details.
 
-| Area | Capabilities |
-|------|-------------|
-| **Connection** | Auto-connect on startup, background thread discovery, auto-reconnect via `_on_lost` callback + fallback read-failure counter |
-| **Control** | Velocity/Position/Torque control mode switching, setpoint spinboxes, Run/Stop buttons |
-| **Calibration/States** | Dropdown of all axis states, triggered by "Execute State" button (not on selection) |
-| **Monitoring** | 100ms polling: VBus voltage, motor current, velocity estimate, position estimate, axis error |
-| **Device Actions** | Save config to NVM, Export/Import JSON config, Reboot, Clear Errors, Dump Errors (console) |
-| **Debug** | Verbose logging toggle, Force Reconnect, Device Info dialog, Read Failure counter dialog |
+**Capabilities now:** Auto-connect/reconnect, velocity/position/torque mode
+switching, setpoint spinboxes, Run/Stop, all axis states via dropdown + button,
+100 ms polling of basic readings, save/export/import config, reboot, clear errors,
+device info dialog, verbose logging, read-failure counter.
 
-### Strengths
-
-1. Clean architecture, documented threading model
-2. Safe state execution (dropdown + button, no accidental calibration)
-3. Robust reconnection (primary `_on_lost` + fallback read-failure counter)
-4. Thread-safe (all Qt via `QTimer.singleShot`)
-5. Well-documented (ARCHITECTURE.md, README.md)
-
-### Weaknesses / Gaps
-
-1. No calibration workflow — dropdown with states, no guidance, no progress, no validation
-2. No control tuning — no access to PID gains, current limits, velocity limits, input modes
-3. Error display is minimal — single raw integer, no sub-error decoding
-4. No Hall sensor awareness — no pole-count config, no low-speed handling
-5. No monitoring history — readings displayed but not recorded or plotted
-6. No analog input support — no foot pedal mapping yet
-7. No feed-forward calibration (inertia/friction measurement)
+**Gaps:** No calibration workflow, no control tuning (gains, limits, input mode),
+no decoded error display, no hall sensor awareness, no monitoring history/plotting,
+no analog input support, no feed-forward calibration.
 
 ---
 
-## Target Module Structure
-
-The user prefers **a few deep modules** rather than many shallow ones:
+## 2. Target Module Structure
 
 ```
 QtGUI/
@@ -97,270 +75,281 @@ QtGUI/
 ├── calibration.py       # Calibration wizard + inertia/friction measurement tests
 ├── controls.py          # Control settings: gains, limits, input mode, feed-forward
 ├── monitoring.py        # Error display, live plotting, data logging
-├── Plan.md
+├── Plan.md              # ← this file
 └── ARCHITECTURE.md
 ```
 
 ---
 
-## Proposed Feature Roadmap
+## 3. Feature Roadmap
 
+### Phase 1: Control Settings (NOW)
 
+**Goal:** Expose tuning parameters so you can tweak and observe effects.
 
-### Phase 1: Control Settings (NOW — HIGHEST PRIORITY)
+#### 1.1 Gains & Limits Panel (`controls.py`)
 
-**Goal:** Expose tuning parameters and input mode selection so you can tweak
-and observe the effects immediately. "Before we change controls, we need to have
-the monitoring working" — this phase gives you the knobs + the error display to
-see what happens.
-
-#### 1.1 Gains & Limits Panel (`QtGUI/controls.py`)
-
-Live-editable spinboxes (read current device value on connect):
+Live-editable spinboxes that read the current device value on connect:
 
 | Parameter | Attribute | Units | Notes |
 |-----------|-----------|-------|-------|
 | Velocity gain | `controller.config.vel_gain` | N·m/(turn/s) | Main velocity tuning |
-| Velocity integrator | `controller.config.vel_integrator_gain` | N·m/(turn/s·s) | Removes steady-state error |
-| Velocity integrator limit | `controller.config.vel_integrator_limit` | N·m | Cap windup |
+| Velocity integrator gain | `controller.config.vel_integrator_gain` | N·m/turn | Removes steady-state error (accumulates `vel_error × dt`) |
+| Velocity integrator limit | `controller.config.vel_integrator_limit` | N·m | Cap integrator windup. Set to the 42BLF03 rated continuous torque (**0.188 N·m**, ~25 % of peak 0.75 N·m) — any value above the motor's continuous torque capability is effectively no cap. Community heuristic is ~50 % of peak torque; the tighter rated-continuous value is preferred for the sewing machine so the integrator never exceeds continuous rating |
 | Position gain | `controller.config.pos_gain` | (turn/s)/turn | Position mode only |
-| Current limit | `motor.config.current_lim` | A | Between 3.25A cont. and 18A peak |
+| Current limit | `motor.config.current_lim` | A | Show continuous / rated / peak context |
 | Current limit margin | `motor.config.current_lim_margin` | A | |
-| Velocity limit | `controller.config.vel_limit` | turn/s | Safety cap |
-| Enable torque-mode vel limit | `controller.config.enable_torque_mode_vel_limit` | bool | Safety for torque drive |
-| Gain scheduling | `controller.config.enable_gain_scheduling` | bool | "Anti-hunt", reduces gains by position error |
-| Inertia (feed-forward) | `controller.config.inertia` | N·m/(turn/s²) | From dynamics test (later) |
+| Velocity limit | `controller.config.vel_limit` | turn/s | Default to 70, controller error-stops if exceeded |
+| Enable torque-mode vel limit | `controller.config.enable_torque_mode_vel_limit` | bool | |
+| Gain scheduling | `controller.config.enable_gain_scheduling` | bool | |
+| Inertia (feed-forward) | `controller.config.inertia` | N·m/(turn/s²) | From dynamics test (Phase 4) |
 
-#### 1.2 Input Mode Selection
+#### 1.2 Input Mode Selector
 
-| Mode | Use Case |
-|------|----------|
-| `PASSTHROUGH` | Direct setpoint |
-| **`VEL_RAMP`** | **Recommended for sewing machine** — smooth ramps, uses `vel_ramp_rate` + `inertia` feed-forward |
-| `TRAP_TRAJ`, `POS_FILTER` | Position mode (future needle positioning) |
-| `TORQUE_RAMP` | Smooth torque ramps |
+Dropdown with the relevant modes. The sewing machine recommendation is **VEL_RAMP**.
 
-For the sewing machine, `INPUT_MODE_VEL_RAMP` + measured `inertia` is the ideal combo —
-it naturally smooths hall-sensor velocity jitter and gives smooth start/stop.
+| Mode | Value | Use Case |
+|------|-------|----------|
+| PASSTHROUGH | 1 | Direct setpoint |
+| **VEL_RAMP** | **2** | **Recommended** — smooth ramps, uses `vel_ramp_rate` + `inertia` |
+| POS_FILTER | 3 | Position mode only |
+| TRAP_TRAJ | 5 | Position mode (future needle positioning) |
+| TORQUE_RAMP | 6 | Smooth torque ramps |
 
-⚠ **Current config has `input_mode = 6 (POS_FILTER)` with `control_mode = 1 (VELOCITY)`**
-— POS_FILTER is only valid for POSITION_CONTROL. This is a leftover from position-mode
-testing and should be corrected to `VEL_RAMP` or `PASSTHROUGH`. See Known Flaws.
+#### 1.3 Integration
 
-#### Implementation Details
-- `QtGUI/controls.py` (~300–400 lines): `GainsPanel`, `InputModeSelector`
-- Integrate into `main.py`: collapsible "Control Settings" group box below velocity control
+- `controls.py` (new) provides a `GainsPanel(QGroupBox)` (live-editable gain/limit/feed-forward spinboxes, read from device on connect) and an `InputModeSelector(QComboBox)`.
+- Placed as a collapsible "Control Settings" group box in the main window below the existing velocity control section.
 
----
+### Phase 2: Error Display & Config Browser (NOW)
 
-### Phase 2: Error Display & Config Browser (NOW — HIGH PRIORITY)
+**Goal:** Replace the raw integer error with decoded, actionable info, and add a full config tree.
 
-**Goal:** Replace the single raw integer with decoded, actionable error info,
-and add a full config tree so you can see what the device is doing.
-
-#### 2.1 Error Decoding (`QtGUI/monitoring.py`)
+#### 2.1 Error Decoding (`monitoring.py`)
 
 Reuse `odrive.utils.dump_errors()` logic but return structured data:
 
 ```python
-ErrorReport:
-  system: ODriveError
-  axis0:
-    axis, motor, encoder, controller, sensorless  # each: bitmask → decoded names
+@dataclass
+class ErrorReport:
+    system: int           # ODriveError bitmask
+    axis0: AxisErrors     # axis, motor, encoder, controller, sensorless
+    timestamp: float
+
+@dataclass
+class AxisErrors:
+    axis: int             # decoded → list of names
+    motor: int
+    encoder: int
+    controller: int
+    sensorless: int
 ```
 
 #### 2.2 Error Panel
 
-- Each error source on its own line, color-coded (green/red/yellow)
-- Decoded name + short description + hint
-- Clear button
+- Each error source on its own line, color-coded (green = no error, yellow = warning, red = active error).
+- Decoded names + short description + hint.
+- Clear Errors button.
+- Replaces the single raw integer label in the current readings area.
 
 #### 2.3 Error History
 
-- Time-stamped deque (max ~1000), accessible via Device menu
-- Export to text file
+- Time-stamped deque (max 1000 entries), accessible via Device menu.
+- Export to text file.
 
 #### 2.4 Config Browser (Read-Only)
 
-`QDialog` + `QTreeWidget` walking the ODrive object tree recursively — full config view
-without `odrivetool`. Useful for seeing the entire device state at a glance.
+`QDialog` + `QTreeWidget` walking the ODrive object tree recursively. Full config view without `odrivetool`. **Safety:** Recursion depth limited to prevent infinite loops on circular references. Only primitive values and sub-objects displayed (no callable traversal).
 
-#### Implementation Details
-- Error logic in `QtGUI/monitoring.py` (~200 lines)
-- Config Browser in `QtGUI/controls.py` (~100 lines)
-- Integrate into `main.py`: replace the single error label with the error panel;
-  add "Config Browser…" to the Device menu
+#### 2.5 Integration
 
----
+- `monitoring.py` (new) provides: structured error decoding (`ErrorReport`/`AxisErrors` dataclasses), the color-coded error panel replacing the raw-integer error label, and the time-stamped error history (export-to-file).
+- `controls.py` (new) also provides the read-only Config Browser dialog (`QDialog` + `QTreeWidget`).
+- Device menu: replace the standalone "Dump Errors…" and "Clear Errors" actions with a single "Errors…" action that opens the new error panel/history view, plus add "Config Browser…".
 
 ### Phase 3: Monitoring & Plotting (NEXT)
 
-**Goal:** Live visual feedback for tuning, plus data logging for analysis.
+**Goal:** Live visual feedback for tuning, plus data logging.
 
 #### 3.1 Live Plot
-- `pyqtgraph` line chart; channels: velocity, position, current, VBus, setpoint
-- Selectable time window; pause/resume
+
+- `pyqtgraph` line chart.
+- Channels: velocity, position, current, VBus, setpoint.
+- Selectable time window (5s / 30s / 60s).
+- Pause/resume.
+- **Performance:** Plot updates at 100 ms (same as polling rate). Use `pyqtgraph`'s append mode to avoid full redraw.
 
 #### 3.2 Data Logging
-- CSV logging at 100ms; toggle via File menu; timestamped filenames
 
----
+- CSV logging at 100 ms.
+- Toggle via File menu.
+- Timestamped filenames (`odrive_YYYYMMDD_HHMMSS.csv`).
+- Header row with channel names.
+
+#### 3.3 Dependencies
+
+Add `pyqtgraph` to `requirements.txt` (needed here, not Phase 4).
 
 ### Phase 4: Torque Drive + Calibration + Dynamics (NEXT)
 
-**Goal:** Low-speed torque drive experiment, then the full calibration workflow,
-step response tuning, and dynamics measurement.
+**Goal:** Low-speed torque drive experiment, calibration workflow, step response tuning, dynamics measurement.
 
 #### 4.1 Low-Speed Torque-Drive Support
 
-The user's insight: at low speed, **torque drive** (commanding current, relying on the
-fast robust current loop) avoids the velocity PID fighting the jittery hall velocity estimate.
+The insight: at low speed, **torque drive** (commanding current directly) avoids the velocity PID fighting the jittery hall velocity estimate.
 
-Expose a **"Low-speed torque mode"** preset that:
+**Context (low-speed behaviour of hall sensors):** Hall feedback gives only 6 states per pole pair — very low resolution — so the PLL velocity estimate (`snap_to_zero_vel` branch in `encoder.cpp`) forces velocity to 0 below a threshold, causing low-speed vibration/cogging, and near-zero velocity control behaves like position control. Community reports confirm this is expected for hall sensors (`discourse.odriverobotics.com/t/precise-low-speed-velocity-control/6758`, .../low-frequency-noise-with-hall-encoders-odrive-3-6/10464): lowering the encoder bandwidth improves estimate smoothness but does not remove steady-state oscillation.
+
+A "Low-speed torque mode" preset that:
 - Sets `control_mode = TORQUE_CONTROL`
-- Enables `enable_torque_mode_vel_limit` + sets `vel_limit` (safety — prevent run-away)
+- Enables `enable_torque_mode_vel_limit` + sets `vel_limit` (safety — prevent runaway)
 - Applies friction-compensation torque offset
-- Lets the user command torque directly (and later map the pedal to torque)
+- Lets the user command torque directly (later mapped to pedal)
 
-#### 4.2 Calibration Wizard Structure (`QtGUI/calibration.py`)
+#### 4.2 Calibration Wizard (`calibration.py`)
 
-A multi-page `QDialog` (via `QStackedWidget`):
+A multi-page `QDialog` via `QStackedWidget`:
 
-| Step | Action |
-|------|--------|
-| **0. Pre-check** | ⚠ **Warn:** disengage the handwheel clutch before calibration. Belt load causes calibration to fail (motor jumps over electrical revs). |
-| **1. Motor Profile** | Load ACT 42BLF03 preset: `pole_pairs = 8`, `motor_type = HIGH_CURRENT`, `current_lim = 5.0`, phase R/L from current config. Fields editable. |
-| **2. Encoder Config** | Set `encoder.config.mode = ENCODER_MODE_HALL`, CPR = `6 × pole_pairs = 48`, `ignore_illegal_hall_state` (optional) |
-| **3. Motor Cal** | Run motor calibration, poll state, validate result |
-| **4. Hall Phase Cal** | Run `ENCODER_HALL_PHASE_CALIBRATION` (spins motor in open loop, records hall edge phases) |
-| **5. Hall Polarity Cal** | Run `ENCODER_HALL_POLARITY_CALIBRATION` |
-| **6. Encoder Offset Cal** | Run `ENCODER_OFFSET_CALIBRATION` |
-| **7. Summary** | Pass/fail per step, decoded errors, prompt to save config |
+| Step | Action | Error Handling |
+|------|--------|----------------|
+| **0. Pre-check** | ⚠ Ask the user to disengage the handwheel clutch and confirm. Belt load causes calibration to fail (motor jumps electrical revs). No sensor — relies on the user. |
+| **1. Motor Profile** | Load ACT 42BLF03 preset: `pole_pairs=8`, `motor_type=HIGH_CURRENT`, `current_lim=5.0`, phase R/L from config. Editable. | Validate pole_pairs × 6 = CPR |
+| **2. Encoder Config** | Set `mode=HALL`, CPR = 6 × pole_pairs = 48 | Validate consistency |
+| **3. Motor Cal** | Run motor calibration, poll state + errors at 50 ms | Detect return to IDLE or error |
+| **4. Hall Phase Cal** | Run `ENCODER_HALL_PHASE_CALIBRATION` | Same polling + error decode |
+| **5. Hall Polarity Cal** | Run `ENCODER_HALL_POLARITY_CALIBRATION` | Same |
+| **6. Encoder Offset Cal** | Run `ENCODER_OFFSET_CALIBRATION` | Same |
+| **7. Summary** | Pass/fail per step, decoded errors, prompt to save config | — |
 
-**Calibration current:** The wizard pre-fills `calibration_current = 4.0` (from the
-working config). If the motor jumps electrical revs, the wizard suggests increasing
-this value. The pre-check already warns about belt load.
+**Already-calibrated baseline:** The GUI reads `pre_calibrated` (motor + encoder) and the hall flags on entry. For any step that is already valid, the wizard offers **Skip** (recommended) or **Recalibrate**. Recalibrating stages its writes first and only commits to the device **after an explicit confirmation** — the working baseline is never clobbered without the user's OK.
 
-**Pole-count verification:** CPR = 6 × 8 = 48 is hardcoded in the ACT 42BLF03 preset.
-No verification needed — the config already proves this is correct.
+**Disconnect safety:** If the device disconnects during any step, the wizard shows an error. After reconnect, the wizard reads the device state to sync the UI — it does not change the device state. The user can retry or cancel the wizard.
 
-#### 4.3 Progress Tracking
+**Calibration current:** Pre-fills `calibration_current = 4.0`. If the motor jumps electrical revs, suggests increasing this value.
 
-- Poll `axis.current_state` + error registers at 50ms during each calibration step
-- Show current step, elapsed time, spinner ✓/✗ status
-- Auto-detect return to `IDLE` (complete)
-- On error: stop, show decoded error + hint
+#### 4.3 Step Response Test (Tuning Aid)
 
-#### 4.4 Step Response Test (Tuning Aid)
+A step change in setpoint while recording the system response. Not a dashboard feature — it's a **tuning tool** to measure overshoot, settling time, and steady-state error.
 
-A step change in setpoint while recording the system's response. Not a dashboard
-feature — it's a **tuning tool** to measure overshoot, settling time, and
-steady-state error. Helps determine if `vel_gain` / `vel_integrator_gain` are
-correct. Lives in the calibration/tuning section.
+- Custom implementation (or `odrive.utils.step_and_plot()` if available).
+- Plots setpoint vs. actual response.
+- Shows numeric metrics: overshoot %, settling time, steady-state error.
 
-- Uses `odrive.utils.step_and_plot()` or a custom implementation
-- Plots setpoint vs. actual response
-- Shows numeric metrics (overshoot %, settling time, steady-state error)
+#### 4.4 Inertia & Friction Measurement
 
-#### 4.5 Inertia & Friction Measurement Tests
+"Measure Dynamics" section. Each test runs multiple repetitions; shows **mean ± standard deviation**.
 
-A separate "Measure Dynamics" section (each step repeated several times to average
-out noise):
+| Test | Method | Output | Used For |
+|------|--------|--------|----------|
+| **Break-away torque** | Minimum torque to start motion from rest | Static friction (N·m) | Start-up torque pulse in pedal mapping |
+| **Running friction** | Torque needed to run steadily at ~1 rps | Coulomb friction (N·m) | Torque offset in all control modes |
+| **Inertia** | Accelerate 1 → 10 rps, compute J = τ / α | Inertia (N·m/(rps/s)) | `controller.config.inertia` |
 
-1. **Break-away torque (static friction)** — minimum torque to start motion from rest.
-   ⚠ **Measured ~6× larger than running friction** (user's manual test). Stiction is
-   always higher than Coulomb friction (Stribeck curve).
-2. **Running friction (Coulomb)** — torque needed to run steadily at ~1 rev/s.
-3. **Inertia** — accelerate from 1 → 10 rev/s, compute `J = τ / α` from commanded
-   torque vs. measured acceleration.
-
-Each test runs multiple repetitions; the UI shows **mean ± standard deviation**.
-Results stored in the GUI motor profile as **separate values** — break-away and
-running friction must NOT be conflated (6× difference).
+**Important:** Break-away friction is ~6× larger than running friction (measured manually). They must NOT be conflated. The GUI stores them as separate values.
 
 **How results are used:**
-- `inertia` → written to `controller.config.inertia` (used by `VEL_RAMP`/`TRAP_TRAJ` feed-forward)
-- `break_away_friction` → no direct ODrive parameter; used for the **start-up torque
-  pulse** in the pedal mapping: a brief torque ramp/pulse to overcome stiction, then scale
-  back to running friction once motion is detected.
-- `running_friction` → **[FIRMWARE_CHANGE] torque offset** (feed-forward and add to
-  `input_torque` - in all control modes). This compensates friction so the motor actually
-  starts at low pedal positions; it will also keep the control error down in all modes.
-- **Stiction implication:** a plain PID velocity controller must wind up its integrator
-  to overcome stiction, causing delay + overshoot. This is another reason the
-  **torque-drive at low speed** approach matters — you can command the break-away
-  torque directly, then back off to running friction. This is exactly the pedal
-  behavior a sewing machine needs (press pedal → firm start → smooth sewing).
+- `inertia` → written to `controller.config.inertia` (feed-forward for VEL_RAMP/TRAP_TRAJ). This is a pure GUI/config change — no firmware work.
+- `break_away_friction` and `running_friction` → **consumed by firmware** (start-up torque pulse on moving; friction-compensation torque offset added to `input_torque` in all modes, so the motor actually starts at low pedal positions).
 
-#### Implementation Details
-- `QtGUI/calibration.py` (~500–700 lines):
-  - `CalibrationWizard(QDialog)` — multi-page wizard
-  - `MeasureDynamicsDialog(QDialog)` — inertia/friction tests with stats
-  - `StepResponseTest(QDialog)` — step test with plot and metrics
-  - `CalibrationRunner` — background polling worker
-  - `MotorProfile` — dataclass (JSON serializable), ACT 42BLF03 preset built in
-  - `DynamicsResult` — mean/std values
-- `QtGUI/controls.py`: `LowSpeedTorquePreset` (moved here with the torque-drive experiment)
-- Integrate into `main.py`: replace state combo + Execute button with "Calibrate Motor…"
-  and "Measure Dynamics…" buttons
+**Firmware modification — separate stage:** There is no consistent way to compensate friction / apply a start-up pulse from the GUI alone (ODrive has no built-in friction-compensation endpoint), so this is an **explicit, self-contained firmware change** on `Firmware/MotorControl`. It is tracked as its own stage, independently testable and reverted, decoupled from the GUI measurement stage. The firmware change is defined before the pedal mapping (Phase 5) so the friction offset exists when pedal input lands.
 
----
+> **FUTURE firmware option — torque input filter:** As an alternative to `VEL_RAMP` for the control input, a low-pass **torque filter** (smoothing the commanded torque/current input) may be added to the firmware. This is a candidate firmware change to revisit if velocity ramping proves unsuitable (e.g. for pedal torque-mode sewing) — a separate, independently testable firmware change like the friction work above.
+>
+> **Context — why `TORQUE_RAMP`/`torque_ramp_rate` does NOT substitute:** `TORQUE_RAMP` is an *input mode* that ramps `torque_setpoint_` only (`controller.cpp` `INPUT_MODE_TORQUE_RAMP`) — it never updates `vel_setpoint_`. In `VELOCITY` control the loop runs on `vel_setpoint_`, so `TORQUE_RAMP`+`VELOCITY` leaves the velocity setpoint frozen and merely injects a ramping torque offset; it cannot smooth a *velocity* command. It only makes sense paired with `TORQUE_CONTROL` mode (the low-speed torque-drive / pedal-torque path). **The current device config (`sew_config`: `control_mode=1 VELOCITY` + `input_mode=6 TORQUE_RAMP`) is exactly this incoherent combo** — a reason to move to `VEL_RAMP`, and to reserve `TORQUE_RAMP` for torque mode only.
 
-### Phase 5: Foot Pedal Input (FUTURE)
+### Phase 5: Foot Pedal (FUTURE)
 
-**Goal:** Replace the GUI setpoint with the foot pedal analog input.
+**Goal:** Replace GUI setpoint with analog foot pedal input.
 
-#### 5.1 Analog Input
-- Configure a GPIO as `GPIO_MODE_ANALOG_IN`, read ADC value
-- Map voltage → setpoint with a configurable curve
-
-#### 5.2 Response Curve
-- **Custom nonlinear curve** for better low-speed control (user's requirement)
-- Dead zone at pedal-bottom, friction-compensation offset so low pedal positions
-  actually move the machine
+- Configure GPIO as `GPIO_MODE_ANALOG_IN`, read ADC.
+- Custom nonlinear response curve (dead zone, friction-compensation offset).
 - Two mapping modes:
-  - **Velocity mode**: pedal → `input_vel` (standard sewing behavior)
-  - **Torque mode**: pedal → `input_torque` (+ friction offset + velocity limit)
-    for smoother low speed, with break-away torque pulse at start
-- Later: SPM (stitches/min) based mapping using the belt ratio
+  - **Velocity mode:** pedal → `input_vel` (standard sewing).
+  - **Torque mode:** pedal → `input_torque` (+ friction offset + velocity limit) for smoother low speed.
+- Pedal position bar/slider in UI.
+- Curve editor (drag points or polynomial).
 
-#### 5.3 UI
-- Pedal position bar/slider, curve editor (drag points or polynomial)
-- Display handwheel speed (motor rps ÷ belt ratio) as secondary readout
-
-#### Implementation Details
-- New section in `QtGUI/controls.py` — pedal mapping + curve editor
-- May require firmware mod for custom curve on-device; GUI-side mapping is the first step
+**Note:** Belt ratio and SPM display are explicitly **out of scope** — belt slip makes these unreliable. If a sensor is added later, this can be revisited.
 
 ---
 
-## Dependencies
+## 4. Cross-Cutting Concerns
 
-| Feature | Dependency | Purpose |
-|---------|-----------|---------|
-| Core | PySide6 | Qt bindings |
-| Core | odrive | Device communication |
-| Phase 4 | pyqtgraph | Live plotting |
-| All others | Python stdlib | None |
+### 4.1 Error Handling Strategy
+
+**No UI warnings are needed for speed, current, or torque** — the ODrive
+controller enforces limits with its own error-stop mechanisms (`vel_limit`,
+`current_lim`, `dc_max_positive_current`, `enable_torque_mode_vel_limit`).
+
+All device communication follows this pattern:
+
+```python
+try:
+    value = self.axis.controller.config.vel_gain  # or any device read/write
+except Exception as e:
+    self._read_failed("vel_gain", e)  # increments failure counter, triggers reconnect if needed
+```
+
+- **Read failures:** Counted per-read. After 5 consecutive failures (~0.5 s), trigger reconnect.
+- **Write failures:** Shown immediately in status bar. Not fatal — device may be in a transient state.
+- **Calibration errors:** Decoded via `dump_errors()` logic, shown in the wizard step with a hint. User can retry or skip.
+
+### 4.2 Feature Availability (Feature Detection)
+
+The plan targets **ODrive v0.5.6 series** firmware. The GUI checks for **required features** on connect (not version strings):
+
+- Check for expected attributes at each feature level (e.g., `controller.config.vel_gain`, `controller.config.input_mode`, specific control mode enums).
+- If a feature is missing, disable the relevant UI section and show a message.
+- **Already done:** `hasattr` guard for `odrv.reboot()` — extend this pattern to all feature-gated functionality.
+- No version string filtering — the same firmware may vary by build flags.
+
+### 4.3 Testing Strategy
+
+| Level | What | How |
+|-------|------|-----|
+| **Unit** | Module-level logic (error decoding, config parsing, motor profile dataclass) | `pytest`, no hardware needed |
+| **Integration** | Device communication, calibration steps | Against a mock of the hardware interface |
+| **UI** | Main window layout, signal wiring, menu actions | Manual testing per phase |
+| **Regression** | All phases combined | Baseline config check after each phase |
+
+No automated GUI testing (PySide6 `QTest` is too brittle for a single-developer project). Instead, the baseline config in Annex A is checked after each change.
+
+### 4.4 Multi-Axis Limitation
+
+The GUI is explicitly **Axis 0 only**. This is documented in the UI and architecture. If multi-axis support is needed later, the architecture supports it by:
+- Adding an axis selector dropdown.
+- Making all control/monitoring widgets axis-aware.
+- Storing per-axis state in a dict keyed by axis number.
 
 ---
 
-## Current Device Configuration (Known Good Baseline)
+## 5. Dependencies
+
+| Feature | Dependency | Version | Purpose |
+|---------|-----------|---------|---------|
+| Core | PySide6 | ≥ 6.0 | Qt bindings |
+| Core | odrive | ≥ 0.5.0 | Device communication (local in `tools/odrive/`) |
+| Phase 3+ | pyqtgraph | ≥ 0.12 | Live plotting |
+| All others | Python stdlib | — | threading, pathlib, dataclasses, csv, json, collections |
+
+---
+
+## 6. Annex A: Full Device Configuration (Known Good Baseline)
 
 From the user's saved config (`sew_config` — Axis 0, sewing machine motor):
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| `motor.config.pole_pairs` | **8** | 8 pole pairs → 48 hall counts/rev ✓ |
+| `motor.config.pole_pairs` | **8** | 8 pole pairs → 48 hall counts/rev |
 | `motor.config.motor_type` | 0 (HIGH_CURRENT) | |
-| `motor.config.current_lim` | 5.0 A | Continuous rating |
+| `motor.config.current_lim` | **5.0 A** | Compromise between continuous and peak ratings (see Annex B) |
 | `motor.config.current_lim_margin` | 8.0 A | Errors at 13 A |
 | `motor.config.requested_current_range` | 12.0 A | Current sensor range |
 | `motor.config.calibration_current` | 4.0 A | |
 | `motor.config.torque_constant` | 0.036 N·m/A | |
 | `motor.config.torque_lim` | 0.7 N·m | |
-| `motor.config.phase_resistance` | 0.348 Ω | Measured by calibration |
-| `motor.config.phase_inductance` | 0.140 mH | Measured by calibration |
+| `motor.config.phase_resistance` | 0.348 Ω | Calibrated |
+| `motor.config.phase_inductance` | 0.140 mH | Calibrated |
 | `motor.config.pre_calibrated` | true | |
 | `encoder.config.mode` | 1 (HALL) | |
 | `encoder.config.cpr` | 48 | 6 × 8 pole pairs |
@@ -371,11 +360,11 @@ From the user's saved config (`sew_config` — Axis 0, sewing machine motor):
 | `encoder.config.direction` | 1 | |
 | `encoder.config.bandwidth` | 100 | PLL bandwidth |
 | `controller.config.control_mode` | 1 (VELOCITY) | |
-| `controller.config.input_mode` | **6 (POS_FILTER)** | ⚠ See flaw below |
+| `controller.config.input_mode` | **2 (VEL_RAMP)** | Smooth ramps for sewing machine, uses `vel_ramp_rate` + `inertia` |
 | `controller.config.vel_gain` | 0.0346 N·m/(turn/s) | |
 | `controller.config.vel_integrator_gain` | 0.173 N·m/(turn/s·s) | |
-| `controller.config.vel_integrator_limit` | 10.0 N·m | |
-| `controller.config.vel_limit` | 70.0 turn/s | Motor max ≈ 66.7 (4000 RPM) |
+| `controller.config.vel_integrator_limit` | **0.188 N·m** | Rated continuous torque (42BLF03) — caps integrator windup |
+| `controller.config.vel_limit` | **70.0 turn/s** | ~4200 RPM — above motor rated 4000 RPM, kept for now |
 | `controller.config.vel_ramp_rate` | 50.0 turn/s² | |
 | `controller.config.pos_gain` | 2.5 (turn/s)/turn | |
 | `controller.config.inertia` | 0.0 | Feed-forward — not yet calibrated |
@@ -388,60 +377,58 @@ From the user's saved config (`sew_config` — Axis 0, sewing machine motor):
 | `config.dc_max_negative_current` | -0.05 A | Regen limit |
 | `config.dc_bus_overvoltage_trip_level` | 26.5 V | |
 | `motor_thermistor.config.enabled` | false | No motor temp sensor — continuous rating protects motor |
-| `fet_thermistor.config.enabled` | true | Controller board temp monitored |
-
-### Resolved Questions
-
-1. **Pole count** — resolved: `pole_pairs = 8`, `cpr = 48`. The datasheet's "8 poles"
-   is misleading or refers to a different variant. The working config is correct.
-2. **Belt ratio** — dropped. No value without a sensor, belt slips so errors accumulate.
-   SPM display will not be attempted.
-3. **PSU current** — resolved. Supply current ≠ motor current (capacitors decouple).
-   The real protections are `dc_max_positive_current` and FET/motor temperature.
-4. **Calibration with belt** — confirmed: does NOT work (current too low, motor jumps
-   electrical revs). Wizard must include a pre-check to disengage the clutch.
-5. **Control mode testing** — confirmed: user wants to switch modes in the UI and
-   monitor parameters with a plot.
-
-### Open Design Questions
-
-1. **Which control mode at low speed** — velocity (with VEL_RAMP + inertia) vs.
-   torque drive (with friction offset + vel limit). The plan supports both;
-   user wants to test and compare in the UI.
-
-### Known Flaws / Observations in Current Setup
-
-These are issues found while reviewing the saved config and firmware. They are
-NOT blocking — the GUI should surface and help manage them.
-
-1. **`input_mode = POS_FILTER (6)` with `control_mode = VELOCITY (1)`** — inconsistent.
-   POS_FILTER is for position control only. A leftover from testing — the user
-   confirmed **VEL_RAMP is the intended mode** (just wasn't saved in the last config).
-2. **Motor thermistor disabled** — `motor_thermistor.config.enabled = false`.
-   Expected: no temp sensor on the motor. The 3.25A continuous rating is the
-   thermal protection. The GUI should display continuous vs. peak rating clearly.
-3. **`vel_limit = 70` > motor max (66.7 turn/s)** — harmless. May later be useful
-   for a "slow operation mode" or testing control modes at e.g. 10 rev/s.
-4. **`current_lim = 5.0` is a compromise** between 3.25A continuous and 18A peak.
-   The GUI should show both continuous and peak ratings and clarify that current_lim
-   sits between them.
-5. **Calibration with belt attached fails** (confirmed by user). The wizard's
-   pre-check (step 0) handles this. Clutch disengagement is the manual step.
-6. **Belt slip** — the belt slips occasionally, so any position-based measurement
-   (belt ratio, SPM) is unreliable without a sensor. Dropped.
+| `fet_thermistor.config.enabled` | true | FET temp monitored |
 
 ---
 
-## Summary
+## 7. Annex B: Motor Datasheet — 42BLF Series
 
-```
-Phase 1: Control Settings + Input Mode  ───  NOW  ───  Knobs first, see effects
-Phase 2: Error Display + Config Browser  ───  NOW  ───  Monitoring + full config view
-Phase 3: Live Plot + Data Logging        ─── NEXT  ───  Visual feedback + recording
-Phase 4: Torque Drive + Cal + Step + Dyn ─── NEXT  ───  Experiments + calibration + tuning
-Phase 5: Foot Pedal                      ─── LATER ───  Control without GUI
-```
+Source: `42BLF.PDF` (ACT MOTOR, 42BLF series brushless DC motor).
+
+### General Specifications
+
+| Parameter | Value |
+|-----------|-------|
+| Winding Type | Star |
+| Hall Effect Angle | 120° Electrical Angle |
+| Insulation Class | B |
+| Ambient Temperature | -20°C ~ +50°C |
+| Insulation Resistance | 100 MΩ min. (500 VDC) |
+| Dielectric Strength | 500 VAC 1 minute |
+
+### Electrical Specifications (per model)
+
+| Parameter | 42BLF01 | 42BLF02 | **42BLF03** |
+|-----------|---------|---------|----------|
+| Number of Poles | 8 | 8 | 8 |
+| Number of Phases | 3 | 3 | 3 |
+| Rated Voltage | 24 VDC | 24 VDC | 24 VDC |
+| Rated Speed | 4000 RPM | 4000 RPM | 4000 RPM |
+| Rated Torque | 0.063 N·m | 0.125 N·m | **0.188 N·m** |
+| Rated Current | 1.9 A | 3.4 A | **5.7 A** |
+| Output Power | 26 W | 52 W | **78 W** |
+| Peak Torque | 0.18 N·m | 0.38 N·m | **0.75 N·m** |
+| Peak Current | 5.7 A | 10.2 A | **18 A** |
+| Torque Constant | 0.035 N·m/A | 0.036 N·m/A | **0.036 N·m/A** |
+| Back EMF | 3.7 V/KRPM | 3.8 V/KRPM | **3.8 V/KRPM** |
+| Rotor Inertia | 24 g·cm² | 48 g·cm² | **72 g·cm²** |
+| Body Length | 47 mm | 63 mm | **79 mm** |
+| Mass | 0.33 kg | 0.48 kg | **0.63 kg** |
+
+**Note:** The user's conservative continuous current rating for this application
+(3.25 A) is lower than the datasheet rated current (5.7 A). The config compromise
+`current_lim = 5.0 A` sits between the two. Pole count "8" in the datasheet
+corresponds to `pole_pairs = 8` in the working device config.
 
 ---
 
-*Last updated: August 2025*
+## 8. Change Log
+
+| Date | Change |
+|------|--------|
+| 2025-08 | Initial plan. Consolidation of original `Plan.md` — fixed contradictions, removed duplication, added Phase 0, corrected dependency mapping, corrected `input_mode` enum (value 6 = TORQUE_RAMP, not POS_FILTER), restored Annex A/B per user request. |
+| 2025-08 | Removed UI warning noise (speed/current/torque) — replaced with controller-level protections. Replaced firmware-version detection with `hasattr` feature checks. |
+| 2025-08 | Removed Phase 0 and Known Flaws section — Annex A is now the reference config (device will be reset and written). Updated Annex A values to the intended baseline (input_mode=VEL_RAMP, vel_limit=66.7). |
+| 2025-08 | Review fixes: reconnect threshold confirmed as 5 consecutive failures (~0.5 s) — corrected code + ARCHITECTURE.md (was 50/~5 s). Removed module line-count estimates in §1.3/§2.5 in favour of feature descriptions. Corrected `vel_integrator_gain` units (N·m/turn). Calibration wizard now detects `pre_calibrated` and offers Skip / stage-then-confirm Recalibrate. Split friction compensation out of the GUI-only measurement into an explicit standalone firmware stage. Device menu: "Dump Errors…"/"Clear Errors" replaced by a single "Errors…" action opening the new error panel. |
+| 2025-08 | Final baseline decisions: `vel_limit` kept at **70** (was 66.7) — any value >50 is practically no-limit since torque/current caps out first; `input_mode = VEL_RAMP (2)` everywhere. `vel_integrator_limit` set to **0.188 N·m** (42BLF03 rated continuous torque, ~25 % of peak) instead of 10.0, so the integrator can't demand more torque than the motor can continuously produce (community heuristic is ~50 % of peak torque — a tighter cap chosen deliberately). |
+| 2025-08 | Web review: added hall low-speed performance context (§4.1) with community references; documented why `TORQUE_RAMP` + `torque_ramp_rate` does not work in `VELOCITY` mode and that the current device config (`VELOCITY` + `TORQUE_RAMP`) is an incoherent combo — see §4.4 future-torque-filter note. |
