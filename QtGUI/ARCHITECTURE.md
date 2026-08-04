@@ -68,7 +68,7 @@ QtGUI/main.py
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  File  Device ▼                                   │  ← menu bar
+│  File  Device ▼  Debug ▼                          │  ← menu bar
 ├──────────────────────────────────────────────────┤
 │  [▶ Run (Closed Loop)]  [■ Stop (Idle)]  State: [AXIS_STATE_IDLE ▾]  [Execute State] │
 ├──────────────────────────────────────────────────┤
@@ -103,6 +103,8 @@ QtGUI/main.py
 | **`hasattr` for remote methods** | Before calling `odrv.reboot()`, the code checks with `hasattr` so that firmware variants without the reboot endpoint get a clear error message instead of an `AttributeError`. |
 | **Device section → menu bar** | Save/Export/Import/Reboot moved from a group box to a **Device** menu on the menu bar. This declutters the main area and follows standard desktop GUI conventions. The menu is disabled until connected, just like the control widgets. |
 | **Connection status in the status bar footer** | The connection status label is a permanent widget on the `QStatusBar` instead of a dedicated group box. This keeps the main area focused on control and monitoring, while the footer always shows the connection state. Temporary action messages (save, export, etc.) appear via `showMessage()` on the left. |
+| **Persistent status bar messages** | `showMessage(text, 0)` is used for connection progress ("Finding ODrive...", "Connected!") so they don't disappear after the default 3 s timeout. Action messages (save, export) still use the default transient timeout. |
+| **Debug menu** | A Debug menu provides verbose logging toggle, force reconnect, and device info — useful for diagnosing connection issues without restarting the GUI. |
 | **No connect/disconnect button** | Auto-connect on startup + auto-reconnect on loss makes a manual button redundant. The status bar shows the current state. |
 
 ## Threading Model

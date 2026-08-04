@@ -31,7 +31,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..
 
 import odrive
 import odrive.configuration
+from odrive.utils import dump_errors
+
+# Import fibre for ObjectLostError disconnect detection
+import fibre
+
 from odrive.enums import (
+    AXIS_ERROR_NONE,
     AXIS_STATE_CLOSED_LOOP_CONTROL,
     AXIS_STATE_ENCODER_DIR_FIND,
     AXIS_STATE_ENCODER_INDEX_SEARCH,
@@ -44,6 +50,7 @@ from odrive.enums import (
     CONTROL_MODE_POSITION_CONTROL,
     CONTROL_MODE_TORQUE_CONTROL,
     CONTROL_MODE_VELOCITY_CONTROL,
+    AxisError,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,7 +83,7 @@ STATE_MAP = {
 class ODriveGUI(QMainWindow):
     """Main ODrive GUI window - Axis 0 velocity control focused."""
 
-    def __init__(self):
+    def __init__(self, verbose=False):
         super().__init__()
         self.odrive = None
         self.axis = None
@@ -85,9 +92,10 @@ class ODriveGUI(QMainWindow):
         self.controller = None
 
         self._connecting = False
-        self._auto_reconnect = True
         self._read_fail_count = 0
         self._last_synced_mode = None
+        self._last_read_error = None
+        self._verbose = verbose
 
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.update_readings)
@@ -136,6 +144,44 @@ class ODriveGUI(QMainWindow):
         reboot_action.triggered.connect(self.on_reboot)
         self.device_menu.addAction(reboot_action)
 
+        self.device_menu.addSeparator()
+
+        clear_errors_action = QAction("Clear Errors", self)
+        clear_errors_action.setStatusTip("Clear all axis and system errors on the device")
+        clear_errors_action.triggered.connect(self._on_clear_errors)
+        self.device_menu.addAction(clear_errors_action)
+
+        dump_errors_action = QAction("Dump Errors…", self)
+        dump_errors_action.setStatusTip("Print detailed error info to the console")
+        dump_errors_action.triggered.connect(self._on_dump_errors)
+        self.device_menu.addAction(dump_errors_action)
+
+        self.device_menu.addSeparator()
+
+        info_action = QAction("Device Info…", self)
+        info_action.setStatusTip("Show serial number, firmware version and status")
+        info_action.triggered.connect(self._on_show_device_info)
+        self.device_menu.addAction(info_action)
+
+        dump_action = QAction("Dump Read Failures…", self)
+        dump_action.setStatusTip("Show the current read-failure counter")
+        dump_action.triggered.connect(self._on_dump_state)
+        self.device_menu.addAction(dump_action)
+
+        # ── Debug menu ────────────────────────────────────────────────
+        debug_menu = menubar.addMenu("&Debug")
+
+        self.verbose_action = QAction("Verbose Logging", self, checkable=True)
+        self.verbose_action.setChecked(self._verbose)
+        self.verbose_action.setStatusTip("Enable DEBUG-level logging to console")
+        self.verbose_action.toggled.connect(self._on_verbose_toggled)
+        debug_menu.addAction(self.verbose_action)
+
+        reconnect_action = QAction("Force Reconnect", self)
+        reconnect_action.setStatusTip("Drop the current connection and reconnect")
+        reconnect_action.triggered.connect(self.connect_odrive)
+        debug_menu.addAction(reconnect_action)
+
         # ── Control (run/stop + calibration) ──────────────────────────
         control_layout = QHBoxLayout()
         control_layout.setContentsMargins(0, 0, 0, 0)
@@ -170,7 +216,7 @@ class ODriveGUI(QMainWindow):
         self.status_label = QLabel("Not connected")
         self.status_label.setStyleSheet("color: gray; font-weight: bold; padding: 2px 8px;")
         self.statusBar().addPermanentWidget(self.status_label)
-        self.statusBar().showMessage("Ready")
+        self.statusBar().showMessage("Ready", 0)
 
         # ── Velocity Control ────────────────────────────────────────
         self.vel_group = QGroupBox("Velocity Control")
@@ -245,7 +291,6 @@ class ODriveGUI(QMainWindow):
 
     def closeEvent(self, event):
         """Clean up on window close."""
-        self._auto_reconnect = False
         self.update_timer.stop()
         if self.odrive is not None:
             try:
@@ -259,41 +304,62 @@ class ODriveGUI(QMainWindow):
     def connect_odrive(self):
         """Start connecting to an ODrive in a background thread."""
         if self._connecting:
+            logger.debug("connect_odrive: already connecting, skipping")
             return
+
+        logger.debug("connect_odrive: called (odrive=%s, axis=%s)",
+                     self.odrive is not None, self.axis is not None)
 
         # Clean up stale references
         if self.odrive is not None:
             try:
                 self.axis.requested_state = AXIS_STATE_IDLE
-            except Exception:
-                pass
+                logger.debug("connect_odrive: set axis to IDLE")
+            except Exception as ex:
+                logger.debug("connect_odrive: set IDLE failed: %s", ex)
             self.axis = None
             self.motor = None
             self.encoder = None
             self.controller = None
             self.odrive = None
+            logger.debug("connect_odrive: stale references cleared")
 
         self._connecting = True
         self._read_fail_count = 0
         self._last_synced_mode = None
         self.status_label.setText("Connecting...")
         self.status_label.setStyleSheet("color: orange; font-weight: bold;")
-        self.statusBar().showMessage("Finding ODrive...")
+        self.statusBar().showMessage("Finding ODrive...", 0)
 
+        logger.debug("connect_odrive: spawning _connect_worker thread")
         threading.Thread(target=self._connect_worker, daemon=True).start()
 
     def _connect_worker(self):
-        """Runs in a background thread. Delivers the result back on the
-        main thread via queued QTimer.singleShot calls."""
+        """Runs in a background thread (daemon). Calls odrive.find_any()
+        which blocks until a device is discovered, then delivers the result
+        to the main thread via QTimer.singleShot.
+
+        The odrive library starts a background discovery thread on the
+        first call, so subsequent calls return immediately if a device is
+        already known.
+        """
+        logger.debug("connect_worker: thread started, calling odrive.find_any()...")
         try:
             odrv = odrive.find_any()
+            logger.debug("connect_worker: find_any() returned device %s", odrv)
         except Exception as e:
-            QTimer.singleShot(0, lambda: self._on_connect_failed(str(e)))
-        else:
-            QTimer.singleShot(0, lambda: self._on_connected(odrv))
+            # Capture the message string before the exception variable is
+            # cleared (Python 3.14+ deletes it at the end of the except block).
+            msg = str(e)
+            logger.debug("connect_worker: find_any() raised: %s", msg)
+            QTimer.singleShot(0, self, lambda: self._on_connect_failed(msg))
+            return
+        logger.debug("connect_worker: scheduling _on_connected on main thread")
+        QTimer.singleShot(0, self, lambda: self._on_connected(odrv))
 
     def _on_connected(self, odrv):
         """Handle successful connection in the main thread."""
+        logger.debug("on_connected: wiring up device")
         self.odrive = odrv
         self.axis = odrv.axis0
         self.motor = self.axis.motor
@@ -301,45 +367,43 @@ class ODriveGUI(QMainWindow):
         self.controller = self.axis.controller
         self._connecting = False
         self._read_fail_count = 0
+        logger.debug("on_connected: axis0 wired (motor=%s, encoder=%s, controller=%s)",
+                     self.motor is not None, self.encoder is not None, self.controller is not None)
 
         # The odrive library notifies us when this device disconnects
         # (its background discovery thread keeps running).
         try:
+            logger.debug("on_connected: checking _on_lost state")
             if self.odrive._on_lost.done():
-                # Device dropped during connection setup; reconnect instead.
-                logger.warning("Device lost during connection setup; scheduling reconnect")
+                logger.warning("on_connected: device already lost during setup, reconnecting")
                 QTimer.singleShot(0, self.connect_odrive)
                 return
             self.odrive._on_lost.add_done_callback(self._on_device_lost)
+            logger.debug("on_connected: _on_device_lost callback registered")
         except Exception as e:
-            logger.warning("Could not register lost-connection callback: %s", e)
+            logger.warning("on_connected: _on_lost registration failed: %s", e)
 
         self.status_label.setText("Connected")
         self.status_label.setStyleSheet("color: green; font-weight: bold;")
-        self.statusBar().showMessage("Connected!")
+        self.statusBar().showMessage("Connected!", 0)
         self._set_controls_enabled(True)
+        logger.info("Connected to ODrive")
 
     def _on_device_lost(self, _future):
         """Called from the odrive discovery thread when the device disconnects.
         Qt widgets must only be touched from the main thread, so we queue the
         reconnect via a timer."""
-        if self._auto_reconnect:
-            logger.warning("ODrive connection lost (notification)")
-            QTimer.singleShot(0, self.connect_odrive)
-
+        logger.warning("on_device_lost: connection lost (thread=%s, future.done=%s)",
+                       threading.current_thread().name, _future.done())
+        QTimer.singleShot(0, self, self.connect_odrive)
     def _on_connect_failed(self, msg):
         """Handle connection failure in the main thread."""
         self._connecting = False
-        if self._auto_reconnect:
-            logger.warning("Connection failed, retrying in %d ms: %s", RECONNECT_RETRY_DELAY_MS, msg)
-            self.status_label.setText("Reconnecting...")
-            self.status_label.setStyleSheet("color: orange; font-weight: bold;")
-            QTimer.singleShot(RECONNECT_RETRY_DELAY_MS, self.connect_odrive)
-        else:
-            QMessageBox.critical(self, "Connection Error", f"Failed to connect: {msg}")
-            self.status_label.setText("Disconnected")
-            self.status_label.setStyleSheet("color: red; font-weight: bold;")
-            self._set_controls_enabled(False)
+        logger.warning("on_connect_failed: %s (retry in %d ms)", msg, RECONNECT_RETRY_DELAY_MS)
+        self.status_label.setText("Reconnecting...")
+        self.status_label.setStyleSheet("color: orange; font-weight: bold;")
+        self.statusBar().showMessage("Finding ODrive...", 0)
+        QTimer.singleShot(RECONNECT_RETRY_DELAY_MS, self.connect_odrive)
 
     def _set_controls_enabled(self, enabled):
         """Enable or disable all control widgets that require a connection."""
@@ -348,19 +412,18 @@ class ODriveGUI(QMainWindow):
         self.stop_button.setEnabled(enabled)
         self.state_combo.setEnabled(enabled)
         self.calib_button.setEnabled(enabled)
-        self.device_menu.setEnabled(enabled)
 
     # ── Control handlers ──────────────────────────────────────────────
 
     def sync_ui_from_controller(self):
-        """Sync mode combo and visible spinboxes from actual controller.control_mode.
+        """Sync mode combo and visible spinboxes from actual controller.config.control_mode.
 
         Only reads the device when the mode may have changed, to keep USB traffic low.
         """
         if self.controller is None:
             return
         try:
-            actual_mode = self.controller.control_mode
+            actual_mode = self.controller.config.control_mode
         except Exception:
             return
 
@@ -384,7 +447,7 @@ class ODriveGUI(QMainWindow):
         if self.controller is None:
             return None
         try:
-            return self.controller.control_mode
+            return self.controller.config.control_mode
         except Exception:
             return None
 
@@ -414,35 +477,49 @@ class ODriveGUI(QMainWindow):
         if new_mode is None:
             return
         try:
-            if self.controller.control_mode == new_mode:
+            if self.controller.config.control_mode == new_mode:
                 return
         except Exception:
             pass
-        self.controller.control_mode = new_mode
-        if new_mode == CONTROL_MODE_VELOCITY_CONTROL:
-            self.controller.input_vel = self.vel_spinbox.value()
-        elif new_mode == CONTROL_MODE_POSITION_CONTROL:
-            self.controller.input_pos = self.pos_spinbox.value()
-        elif new_mode == CONTROL_MODE_TORQUE_CONTROL:
-            self.controller.input_torque = self.torque_spinbox.value()
+        try:
+            self.controller.config.control_mode = new_mode
+            if new_mode == CONTROL_MODE_VELOCITY_CONTROL:
+                self.controller.input_vel = self.vel_spinbox.value()
+            elif new_mode == CONTROL_MODE_POSITION_CONTROL:
+                self.controller.input_pos = self.pos_spinbox.value()
+            elif new_mode == CONTROL_MODE_TORQUE_CONTROL:
+                self.controller.input_torque = self.torque_spinbox.value()
+            self.statusBar().showMessage(f"Control mode set to {mode}", 3000)
+        except Exception as e:
+            logger.warning("Failed to set control mode %s: %s", mode, e)
+            self.statusBar().showMessage(f"Failed to set control mode: {e}", 3000)
 
     @Slot(float)
     def on_velocity_changed(self, value):
         """Update velocity setpoint (only when in velocity mode)."""
         if self._current_control_mode() == CONTROL_MODE_VELOCITY_CONTROL:
-            self.controller.input_vel = value
+            try:
+                self.controller.input_vel = value
+            except Exception as e:
+                logger.debug("Failed to set input_vel: %s", e)
 
     @Slot(float)
     def on_torque_changed(self, value):
         """Update torque setpoint (only when in torque mode)."""
         if self._current_control_mode() == CONTROL_MODE_TORQUE_CONTROL:
-            self.controller.input_torque = value
+            try:
+                self.controller.input_torque = value
+            except Exception as e:
+                logger.debug("Failed to set input_torque: %s", e)
 
     @Slot(float)
     def on_position_changed(self, value):
         """Update position setpoint (only when in position mode)."""
         if self._current_control_mode() == CONTROL_MODE_POSITION_CONTROL:
-            self.controller.input_pos = value
+            try:
+                self.controller.input_pos = value
+            except Exception as e:
+                logger.debug("Failed to set input_pos: %s", e)
 
     @Slot(str)
     def on_state_changed(self, state_str):
@@ -539,7 +616,111 @@ class ODriveGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Reboot Error", f"Failed to reboot: {e}")
 
+    # ── Debug helpers ─────────────────────────────────────────────────
+
+    @Slot(bool)
+    def _on_verbose_toggled(self, checked):
+        """Toggle DEBUG-level logging on the root logger."""
+        logging.getLogger().setLevel(logging.DEBUG if checked else logging.INFO)
+        logger.info("Verbose logging %s", "enabled" if checked else "disabled")
+        self.statusBar().showMessage("Verbose logging enabled" if checked
+                                     else "Verbose logging disabled", 3000)
+
+    @Slot()
+    def _on_show_device_info(self):
+        """Show serial number, firmware version and live status."""
+        if self.odrive is None:
+            QMessageBox.information(self, "Device Info", "Not connected")
+            return
+        try:
+            serial = odrive.get_serial_number_str_sync(self.odrive)
+        except Exception:
+            serial = "unknown"
+        try:
+            fw = ".".join(str(x) for x in (
+                self.odrive.fw_version_major,
+                self.odrive.fw_version_minor,
+                self.odrive.fw_version_revision,
+            ))
+        except Exception:
+            fw = "unknown"
+        try:
+            vbus = self.odrive.vbus_voltage
+        except Exception:
+            vbus = None
+        lines = [
+            f"Serial number: {serial}",
+            f"Firmware: {fw}",
+            f"VBus: {vbus:.2f} V" if vbus is not None else "VBus: unknown",
+            f"Axis0 error: {self.axis.error if self.axis is not None else 'n/a'}",
+            f"Read failures: {self._read_fail_count}",
+        ]
+        logger.info("Device info:\n%s", "\n".join(lines))
+        QMessageBox.information(self, "Device Info", "\n".join(lines))
+
+    @Slot()
+    def _on_dump_state(self):
+        """Show internal connection state for debugging."""
+        lines = [
+            f"Connecting: {self._connecting}",
+            f"Connected: {self.odrive is not None}",
+            f"Read failures: {self._read_fail_count} (threshold {RECONNECT_FAIL_THRESHOLD})",
+            f"Last synced mode: {self._last_synced_mode}",
+            f"Retry delay: {RECONNECT_RETRY_DELAY_MS} ms",
+        ]
+        logger.info("Internal state:\n%s", "\n".join(lines))
+        QMessageBox.information(self, "Internal State", "\n".join(lines))
+
+    @Slot()
+    def _on_clear_errors(self):
+        """Clear all errors on the device."""
+        if self.odrive is None:
+            return
+        try:
+            self.odrive.clear_errors()
+            logger.info("Cleared all errors")
+            self.statusBar().showMessage("Cleared all errors", 3000)
+        except Exception as e:
+            logger.warning("Failed to clear errors: %s", e)
+            QMessageBox.critical(self, "Clear Errors", f"Failed to clear errors: {e}")
+
+    @Slot()
+    def _on_dump_errors(self):
+        """Capture dump_errors() output and show it in a dialog."""
+        if self.odrive is None:
+            QMessageBox.information(self, "Dump Errors", "Not connected")
+            return
+        try:
+            import io, re
+            buf = io.StringIO()
+            dump_errors(self.odrive, printfunc=lambda x: print(x, file=buf))
+            raw = buf.getvalue()
+            # Strip ANSI colour codes
+            text = re.sub(r"\x1b\[[0-9;]*m", "", raw)
+            logger.info("Error dump:\n%s", text)
+            QMessageBox.information(self, "Error Dump", text.strip())
+        except Exception as e:
+            logger.warning("Failed to dump errors: %s", e)
+            QMessageBox.critical(self, "Dump Errors", f"Failed to dump errors: {e}")
+
     # ── Readings update ───────────────────────────────────────────────
+
+    def _read_failed(self, name, exc):
+        """Handle a read failure. Returns True if it's a device disconnect
+        (ObjectLostError), or False if it's a non-fatal error (e.g. attribute
+        not supported on this firmware).
+
+        Non-fatal errors are logged at DEBUG only on the first occurrence
+        to avoid spamming the log at 10 Hz.
+        """
+        if isinstance(exc, fibre.libfibre.ObjectLostError):
+            logger.debug("Failed to read %s: device lost", name)
+            return True
+        msg = f"{name}: {exc}"
+        if msg != self._last_read_error:
+            logger.debug("Failed to read %s", msg)
+            self._last_read_error = msg
+        return False
 
     def update_readings(self):
         """Update displayed values from the ODrive. If reads fail repeatedly
@@ -554,26 +735,22 @@ class ODriveGUI(QMainWindow):
         try:
             self.vbus_label.setText(f"VBus Voltage: {self.odrive.vbus_voltage:.2f} V")
         except Exception as e:
-            logger.debug("Failed to read vbus_voltage: %s", e)
-            any_failed = True
+            any_failed |= self._read_failed("vbus_voltage", e)
 
         try:
-            self.current_label.setText(f"Motor Current: {self.motor.current_measured:.2f} A")
+            self.current_label.setText(f"Motor Current: {self.odrive.ibus:.2f} A")
         except Exception as e:
-            logger.debug("Failed to read current_measured: %s", e)
-            any_failed = True
+            any_failed |= self._read_failed("ibus", e)
 
         try:
             self.vel_estimate_label.setText(f"Velocity Estimate: {self.encoder.vel_estimate:.3f} rps")
         except Exception as e:
-            logger.debug("Failed to read vel_estimate: %s", e)
-            any_failed = True
+            any_failed |= self._read_failed("vel_estimate", e)
 
         try:
             self.pos_estimate_label.setText(f"Position Estimate: {self.encoder.pos_estimate:.4f} rev")
         except Exception as e:
-            logger.debug("Failed to read pos_estimate: %s", e)
-            any_failed = True
+            any_failed |= self._read_failed("pos_estimate", e)
 
         try:
             if self.axis.error:
@@ -583,27 +760,42 @@ class ODriveGUI(QMainWindow):
                 self.error_label.setText("Error: None")
                 self.error_label.setStyleSheet("color: green; font-weight: bold;")
         except Exception as e:
-            logger.debug("Failed to read axis error: %s", e)
-            any_failed = True
+            any_failed |= self._read_failed("axis.error", e)
         # Fallback disconnect detection (primary is _on_lost)
         if any_failed:
             self._read_fail_count += 1
-            if (self._auto_reconnect
-                    and not self._connecting
+            if self._read_fail_count % 10 == 0:
+                logger.debug("update_readings: %d consecutive read failures", self._read_fail_count)
+            if (not self._connecting
                     and self._read_fail_count >= RECONNECT_FAIL_THRESHOLD):
-                logger.warning("Read failures, reconnecting...")
+                logger.warning("update_readings: fallback reconnect triggered after %d failures",
+                               self._read_fail_count)
                 self._set_controls_enabled(False)
                 self.connect_odrive()
         else:
+            if self._read_fail_count > 0:
+                logger.debug("update_readings: reads recovered after %d failures", self._read_fail_count)
             self._read_fail_count = 0
 
 
 def main():
     """Main entry point."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="ODrive Qt GUI - Axis 0")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="Enable DEBUG-level logging at startup")
+    args, _ = parser.parse_known_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+    )
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
-    window = ODriveGUI()
+    window = ODriveGUI(verbose=args.verbose)
     window.show()
 
     sys.exit(app.exec())
