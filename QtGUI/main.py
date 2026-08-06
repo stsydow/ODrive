@@ -76,15 +76,15 @@ MODE_NAMES = {
 }
 MODE_VALUES = {name: value for value, name in MODE_NAMES.items()}
 
-# Axis states selectable from the dropdown
+# Axis states selectable from the dropdown (friendly label -> value).
 STATE_MAP = {
-    "AXIS_STATE_FULL_CALIBRATION_SEQUENCE": AXIS_STATE_FULL_CALIBRATION_SEQUENCE,
-    "AXIS_STATE_MOTOR_CALIBRATION": AXIS_STATE_MOTOR_CALIBRATION,
-    "AXIS_STATE_ENCODER_INDEX_SEARCH": AXIS_STATE_ENCODER_INDEX_SEARCH,
-    "AXIS_STATE_ENCODER_OFFSET_CALIBRATION": AXIS_STATE_ENCODER_OFFSET_CALIBRATION,
-    "AXIS_STATE_ENCODER_DIR_FIND": AXIS_STATE_ENCODER_DIR_FIND,
-    "AXIS_STATE_HOMING": AXIS_STATE_HOMING,
-    "AXIS_STATE_LOCKIN_SPIN": AXIS_STATE_LOCKIN_SPIN,
+    "Full Calibration Sequence": AXIS_STATE_FULL_CALIBRATION_SEQUENCE,
+    "Motor Calibration": AXIS_STATE_MOTOR_CALIBRATION,
+    "Encoder Index Search": AXIS_STATE_ENCODER_INDEX_SEARCH,
+    "Encoder Offset Calibration": AXIS_STATE_ENCODER_OFFSET_CALIBRATION,
+    "Encoder Direction Find": AXIS_STATE_ENCODER_DIR_FIND,
+    "Homing": AXIS_STATE_HOMING,
+    "Lock-In Spin": AXIS_STATE_LOCKIN_SPIN,
 }
 
 # Reverse map: axis-state value -> short display name (status bar).
