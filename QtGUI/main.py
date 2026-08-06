@@ -626,6 +626,21 @@ class ODriveGUI(QMainWindow):
         except Exception as e:
             logger.debug("sync setpoint from device failed: %s", e)
 
+    def _position_circular_range(self):
+        """Return the circular setpoint range when circular position mode is
+        active, else None. Used to wrap the displayed estimate into
+        [0, range) so it matches the device's circular setpoint behaviour."""
+        if self.controller is None:
+            return None
+        try:
+            if self.controller.config.circular_setpoints:
+                rng = self.controller.config.circular_setpoint_range
+                if rng and float(rng) > 0:
+                    return float(rng)
+        except Exception:
+            pass
+        return None
+
     def _make_setpoint_spin(self, minimum, maximum, decimals):
         """Build a setpoint spinbox. No valueChanged write: the value reaches
         the device only via explicit confirmation (Apply / Enter)."""
@@ -908,7 +923,11 @@ class ODriveGUI(QMainWindow):
             any_failed |= self._read_failed("vel_estimate", e)
 
         try:
-            self.pos_estimate_label.setText(f"est: {self.encoder.pos_estimate:.4f} rev")
+            pos = self.encoder.pos_estimate
+            rng = self._position_circular_range()
+            if rng is not None:
+                pos = pos % rng  # wrap into [0, range) to match circular mode
+            self.pos_estimate_label.setText(f"est: {pos:.4f} rev")
         except Exception as e:
             any_failed |= self._read_failed("pos_estimate", e)
 
