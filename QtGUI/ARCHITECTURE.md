@@ -8,6 +8,10 @@ Designed for **velocity control** as the primary use case, with position and tor
 ```
 QtGUI/main.py
   │
+  ├── controls.py                     # Phase 1: Control Settings
+  │     ├── GainsPanel(QGroupBox)     #   live-editable gains/limits/feed-fwd
+  │     └── InputModeSelector(QComboBox)
+  │
   ├── ODriveGUI(QMainWindow)          # Main window, owns all UI & state
   │     ├── setup_ui()                # Layout: Connection, Control, Calibration, Device, Readings
   │     ├── connect_odrive()          # Background thread → odrive.find_any()
@@ -56,7 +60,7 @@ QtGUI/main.py
 │  Device disconnected (USB unplug)                                │
 │    ├─ PRIMARY: odrv._on_lost fires (library discovery thread)    │
 │    │    └─ QTimer.singleShot(0, connect_odrive)                  │
-│    └─ FALLBACK: update_readings sees 50× consecutive failures    │
+│    └─ FALLBACK: update_readings sees 5× consecutive failures     │
 │         └─ connect_odrive()                                      │
 │                                                                  │
 │  Device reboot (user or import)                                  │
@@ -78,6 +82,15 @@ QtGUI/main.py
 │  Torque Setpoint (A): [   0.000   ▲▼ ]  ← hidden │
 │  Position Setpoint (rev): [   0.0000  ▲▼ ]← hidden│
 ├──────────────────────────────────────────────────┤
+│  ☑ Control Settings  (Phase 1, collapsible)       │
+│  Input Mode: [Velocity Ramp (2) — recommended ▾]  │
+│  ▍ Control Parameters  (vel_gain, integrators, inertia) │
+│   [Vel gain (N·m/(t/s)) ___]  [Vel int gain (N·m/t)___]│
+│  ┌──────────────────────────────────────────────┐ │
+│  │ [Electrical Limits | Mechanical Limits]      │ │
+│  │  [Cur lim (A)___]  [Cur lim margin (A)___]  │ │
+│  └──────────────────────────────────────────────┘ │
+├──────────────────────────────────────────────────┤
 │  Readings (monitoring)                            │
 │  VBus Voltage: 24.50 V                            │
 │  Motor Current: 0.12 A                            │
@@ -95,12 +108,13 @@ QtGUI/main.py
 |----------|-----------|
 | **Plain `threading.Thread` instead of `QThread`** | `QThread` + `QObject::moveToThread` boilerplate is overkill for a single blocking call. A daemon thread + `QTimer.singleShot(0, ...)` to deliver the result to the main thread is simpler and equally safe. |
 | **`_on_lost` callback as primary disconnect detection** | The odrive library's background discovery thread already monitors device health. Registering a done callback on `obj._on_lost` gives instant notification without polling. |
-| **Read-failure fallback** | Catches edge cases where `_on_lost` doesn't fire (older firmware, stale object). 50 consecutive failures at 100ms ≈ 5 seconds. |
+| **Read-failure fallback** | Catches edge cases where `_on_lost` doesn't fire (older firmware, stale object). 5 consecutive failures at 100ms ≈ 0.5 seconds. |
 | **`MODE_NAMES` / `STATE_MAP` dicts** | Avoids fragile `globals()` lookups and repeated `if/elif` chains. Single source of truth for enum ↔ display name. |
 | **`QTimer.singleShot(0, ...)` for thread crossing** | Qt's event loop is thread-safe for `QTimer.singleShot` — it posts a `QTimerEvent` to the main thread's event queue. No mutexes or custom signals needed. |
 | **States execute only via button** | Selecting a state in the dropdown only changes the selection; the `Execute State` button is the sole trigger, so browsing the list can never accidentally start a calibration. |
 | **`_on_lost.done()` guard** | If the device disconnects before the callback can be registered, `add_done_callback` would fire immediately in the connect thread. The `done()` check avoids this by scheduling a fresh reconnect instead. |
 | **`hasattr` for remote methods** | Before calling `odrv.reboot()`, the code checks with `hasattr` so that firmware variants without the reboot endpoint get a clear error message instead of an `AttributeError`. |
+| **Feature-gated control settings (Phase 1)** | `GainsPanel`/`InputModeSelector` read the device on `bind()` and disable any row the firmware doesn't expose (`hasattr` on `obj.config`), per Plan.md §4.2. Writes are wrapped and surfaced via a status callback; a `_syncing` guard suppresses write-backs during programmatic sync. |
 | **Device section → menu bar** | Save/Export/Import/Reboot moved from a group box to a **Device** menu on the menu bar. This declutters the main area and follows standard desktop GUI conventions. The menu is disabled until connected, just like the control widgets. |
 | **Connection status in the status bar footer** | The connection status label is a permanent widget on the `QStatusBar` instead of a dedicated group box. This keeps the main area focused on control and monitoring, while the footer always shows the connection state. Temporary action messages (save, export, etc.) appear via `showMessage()` on the left. |
 | **Persistent status bar messages** | `showMessage(text, 0)` is used for connection progress ("Finding ODrive...", "Connected!") so they don't disappear after the default 3 s timeout. Action messages (save, export) still use the default transient timeout. |

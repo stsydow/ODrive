@@ -255,7 +255,7 @@ A step change in setpoint while recording the system response. Not a dashboard f
 
 > **FUTURE firmware option — torque input filter:** As an alternative to `VEL_RAMP` for the control input, a low-pass **torque filter** (smoothing the commanded torque/current input) may be added to the firmware. This is a candidate firmware change to revisit if velocity ramping proves unsuitable (e.g. for pedal torque-mode sewing) — a separate, independently testable firmware change like the friction work above.
 >
-> **Context — why `TORQUE_RAMP`/`torque_ramp_rate` does NOT substitute:** `TORQUE_RAMP` is an *input mode* that ramps `torque_setpoint_` only (`controller.cpp` `INPUT_MODE_TORQUE_RAMP`) — it never updates `vel_setpoint_`. In `VELOCITY` control the loop runs on `vel_setpoint_`, so `TORQUE_RAMP`+`VELOCITY` leaves the velocity setpoint frozen and merely injects a ramping torque offset; it cannot smooth a *velocity* command. It only makes sense paired with `TORQUE_CONTROL` mode (the low-speed torque-drive / pedal-torque path). **The current device config (`sew_config`: `control_mode=1 VELOCITY` + `input_mode=6 TORQUE_RAMP`) is exactly this incoherent combo** — a reason to move to `VEL_RAMP`, and to reserve `TORQUE_RAMP` for torque mode only.
+> **Context — why `TORQUE_RAMP`/`torque_ramp_rate` does NOT substitute:** `TORQUE_RAMP` is an *input mode* that ramps `torque_setpoint_` only (`controller.cpp` `INPUT_MODE_TORQUE_RAMP`) — it never updates `vel_setpoint_`. In `VELOCITY` control the loop runs on `vel_setpoint_`, so `TORQUE_RAMP`+`VELOCITY` leaves the velocity setpoint frozen and merely injects a ramping torque offset; it cannot smooth a *velocity* command. It only makes sense paired with `TORQUE_CONTROL` mode (the low-speed torque-drive / pedal-torque path). Enum note (this firmware): `CONTROL_MODE_VELOCITY_CONTROL = 2`, `CONTROL_MODE_TORQUE_CONTROL = 1`, `INPUT_MODE_TORQUE_RAMP = 6`. `VEL_RAMP` is the velocity-mode smoothing mechanism; reserve `TORQUE_RAMP` for torque mode. The sewing baseline uses **VELOCITY (2) + VEL_RAMP (2)**.
 
 ### Phase 5: Foot Pedal (FUTURE)
 
@@ -321,6 +321,14 @@ The GUI is explicitly **Axis 0 only**. This is documented in the UI and architec
 - Making all control/monitoring widgets axis-aware.
 - Storing per-axis state in a dict keyed by axis number.
 
+### 4.5 Portability (motor / PSU agnostic)
+
+The GUI and all features must work with a different motor and PSU than this sewing-machine setup. Annex A is **reference context only** — a documentation of one known-good configuration for feasibility checks, **never an assumption about the live device**:
+- All parameter values (gains, limits, CPR, pole pairs, current/vel limits, setpoint ranges) are **read from the connected device at runtime**; nothing is hard-coded from Annex A.
+- Phase 1 spinbox ranges are generous (e.g. current limits 0–60 A) so a different motor/PSU is not clipped; per-row feature gating (§4.2) disables anything the firmware doesn't expose.
+- Calibration (Phase 4.2) uses the *device's existing* values as the starting point and validates consistency (CPR = 6 × pole_pairs) rather than assuming 8 pole pairs / CPR 48.
+- Machine-specific assumptions (belt ratio, SPM, pole count, PSU rating) are explicitly local to this setup and flagged as such.
+
 ---
 
 ## 5. Dependencies
@@ -336,7 +344,9 @@ The GUI is explicitly **Axis 0 only**. This is documented in the UI and architec
 
 ## 6. Annex A: Full Device Configuration (Known Good Baseline)
 
-From the user's saved config (`sew_config` — Axis 0, sewing machine motor):
+From the user's saved config (`sew_config` — Axis 0, sewing machine motor).
+
+**This table is reference context only.** It documents one known-good configuration, used for feasibility checks and as a write-back example. It is **not** assumed to be the live device state, and every feature must work with a different motor/PSU — values are read from the connected device at runtime, never hard-coded (see §4.5 Portability).
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
@@ -359,7 +369,7 @@ From the user's saved config (`sew_config` — Axis 0, sewing machine motor):
 | `encoder.config.phase_offset_float` | 0.677 | |
 | `encoder.config.direction` | 1 | |
 | `encoder.config.bandwidth` | 100 | PLL bandwidth |
-| `controller.config.control_mode` | 1 (VELOCITY) | |
+| `controller.config.control_mode` | **2 (VELOCITY)** | Reference baseline value for the sewing config (firmware enum: VELOCITY=2, TORQUE=1). Not assumed at runtime — GUI reads the live device value |
 | `controller.config.input_mode` | **2 (VEL_RAMP)** | Smooth ramps for sewing machine, uses `vel_ramp_rate` + `inertia` |
 | `controller.config.vel_gain` | 0.0346 N·m/(turn/s) | |
 | `controller.config.vel_integrator_gain` | 0.173 N·m/(turn/s·s) | |
@@ -431,4 +441,4 @@ corresponds to `pole_pairs = 8` in the working device config.
 | 2025-08 | Removed Phase 0 and Known Flaws section — Annex A is now the reference config (device will be reset and written). Updated Annex A values to the intended baseline (input_mode=VEL_RAMP, vel_limit=66.7). |
 | 2025-08 | Review fixes: reconnect threshold confirmed as 5 consecutive failures (~0.5 s) — corrected code + ARCHITECTURE.md (was 50/~5 s). Removed module line-count estimates in §1.3/§2.5 in favour of feature descriptions. Corrected `vel_integrator_gain` units (N·m/turn). Calibration wizard now detects `pre_calibrated` and offers Skip / stage-then-confirm Recalibrate. Split friction compensation out of the GUI-only measurement into an explicit standalone firmware stage. Device menu: "Dump Errors…"/"Clear Errors" replaced by a single "Errors…" action opening the new error panel. |
 | 2025-08 | Final baseline decisions: `vel_limit` kept at **70** (was 66.7) — any value >50 is practically no-limit since torque/current caps out first; `input_mode = VEL_RAMP (2)` everywhere. `vel_integrator_limit` set to **0.188 N·m** (42BLF03 rated continuous torque, ~25 % of peak) instead of 10.0, so the integrator can't demand more torque than the motor can continuously produce (community heuristic is ~50 % of peak torque — a tighter cap chosen deliberately). |
-| 2025-08 | Web review: added hall low-speed performance context (§4.1) with community references; documented why `TORQUE_RAMP` + `torque_ramp_rate` does not work in `VELOCITY` mode and that the current device config (`VELOCITY` + `TORQUE_RAMP`) is an incoherent combo — see §4.4 future-torque-filter note. |
+| 2025-08 | Web review: added hall low-speed performance context (§4.1) with community references; documented why `TORQUE_RAMP` + `torque_ramp_rate` does not work in `VELOCITY` mode — see §4.4 future-torque-filter note. Corrected the control_mode enum: `CONTROL_MODE_VELOCITY_CONTROL = 2` (not 1), `TORQUE=1`. Added §4.5 Portability — Annex A is reference context only, never assumed as the live device state; features are motor/PSU-agnostic. |

@@ -69,12 +69,20 @@ async def discovered_device(device):
     socketio.emit('odrive-found')
 
 def start_discovery():
+    # Only start discovery once; re-use the same fibre domain
+    if 'fibre_domain' in globals():
+        print("discovery already running, re-using existing domain")
+        return
     print("starting disco loop...")
-    log = fibre.Logger(verbose = False)
 
-    domain = fibre.Domain("usb:idVendor=0x1209,idProduct=0x0D32,bInterfaceClass=0,bInterfaceSubClass=1,bInterfaceProtocol=0")
-    domain = domain.__enter__()
-    discovery = domain.run_discovery(discovered_device)
+    if 'fibre_logger' not in globals():
+        globals()['fibre_logger'] = fibre.Logger(verbose = False)
+    fibre_domain = fibre.Domain("usb:idVendor=0x1209,idProduct=0x0D32,bInterfaceClass=0,bInterfaceSubClass=1,bInterfaceProtocol=0")
+    globals()['fibre_domain'] = fibre_domain
+    fibre_domain.__enter__()
+
+    discovery = fibre_domain.run_discovery(discovered_device)
+    print("discovery: ", discovery)
 
 def handle_disconnect(odrive_name):
     print("lost odrive")
@@ -103,7 +111,7 @@ def stopSampling(message):
 def sampledVarNames(message):
     session['sampledVars'] = message
     print(session['sampledVars'])
-    
+
 @socketio.on('startSampling')
 def sendSamples(message):
     print(session['samplingEnabled'])
@@ -179,7 +187,6 @@ def dictFromRO(RO):
         if not key.startswith('_') and isinstance(v, fibre.libfibre.RemoteObject):
             # recurse
             returnDict[key] = dictFromRO(v)
-        
         elif key.startswith('_') and key.endswith('_property'):
             # grab value of that property
             # indicate if this property can be written or not
@@ -224,6 +231,8 @@ def postVal(odrives, keyList, value, argType):
             pass # dont support that type yet
     except fibre.ObjectLostError:
         handle_disconnect(odrv)
+    except (AttributeError, ValueError) as ex:
+        print("attribute error in postVal (non-fatal):", ex)
     except Exception as ex:
         print("exception in postVal: ", traceback.format_exc())
 
@@ -242,6 +251,10 @@ def getVal(odrives, keyList):
         return retVal
     except fibre.ObjectLostError:
         handle_disconnect(odrv)
+    except (AttributeError, ValueError) as ex:
+        # axis doesn't exist, property not available, etc.
+        print("attribute error in getVal (non-fatal):", ex)
+        return 0
     except Exception as ex:
         print("exception in getVal: ", traceback.format_exc())
         return 0
@@ -267,13 +280,13 @@ def callFunc(odrives, keyList):
             RO.__call__()
     except fibre.ObjectLostError:
         handle_disconnect(odrv)
-    except:
+    except (AttributeError, ValueError):
+        print("attribute error in callFunc (non-fatal)")
+    except Exception:
         print("fcn call failed")
 
 if __name__ == "__main__":
-    print("args from python: " + str(sys.argv[1:0]))
-    #print(sys.argv[1:])
-    # try to import based on command line arguments or config file
+    print("args from python: " + str(sys.argv[1:]))
 
     for optPath in sys.argv[1:]:
         print("adding " + str(optPath.rstrip()) + " to import path for odrive_server.py")
@@ -292,7 +305,10 @@ if __name__ == "__main__":
     # spinlock
     globals()['inUse'] = False
 
-    log = fibre.Logger(verbose=False)
+    if 'fibre_logger' not in globals():
+        globals()['fibre_logger'] = fibre.Logger(verbose = False)
+
     shutdown = fibre.Event()
 
+    start_discovery()
     socketio.run(app, host='0.0.0.0', port=5000)

@@ -33,6 +33,9 @@ import odrive
 import odrive.configuration
 from odrive.utils import dump_errors
 
+# Phase 1: Control Settings (Plan.md §1)
+from controls import ControlParamsGroup, InputModeSelector, LimitsTabs
+
 # Import fibre for ObjectLostError disconnect detection
 import fibre
 
@@ -57,7 +60,7 @@ logger = logging.getLogger(__name__)
 
 # Fallback safety net: consecutive read failures (at 100ms poll) before reconnect.
 # The odrive library's _on_lost callback is the primary disconnect detection.
-RECONNECT_FAIL_THRESHOLD = 50  # ~5 seconds
+RECONNECT_FAIL_THRESHOLD = 5  # ~0.5 seconds
 RECONNECT_RETRY_DELAY_MS = 1000
 
 # Control mode <-> display name
@@ -271,6 +274,21 @@ class ODriveGUI(QMainWindow):
 
         main_layout.addWidget(self.vel_group)
 
+        # ── Control Settings (Phase 1, collapsible) ─────────────────
+        self.controls_group = QGroupBox("Control Settings")
+        self.controls_group.setCheckable(True)
+        self.controls_group.setChecked(True)
+        self.controls_group.setToolTip("Untick to collapse")
+        cg_layout = QVBoxLayout(self.controls_group)
+        self.input_selector = InputModeSelector(self.statusBar().showMessage)
+        self.control_params = ControlParamsGroup(self.statusBar().showMessage)
+        self.limits_tabs = LimitsTabs(self.statusBar().showMessage)
+        cg_layout.addWidget(self.input_selector)
+        cg_layout.addWidget(self.control_params)
+        cg_layout.addWidget(self.limits_tabs)
+        self.controls_group.toggled.connect(self._on_controls_collapsed)
+        main_layout.addWidget(self.controls_group)
+
         # ── Readings (monitoring) ───────────────────────────────────
         readings_group = QGroupBox("Readings")
         readings_layout = QVBoxLayout()
@@ -383,6 +401,11 @@ class ODriveGUI(QMainWindow):
         except Exception as e:
             logger.warning("on_connected: _on_lost registration failed: %s", e)
 
+        # Phase 1 control settings: load current device values + feature gate
+        self.input_selector.bind(self.controller)
+        self.control_params.bind(self.controller, self.motor, self.odrive)
+        self.limits_tabs.bind(self.controller, self.motor, self.odrive)
+
         self.status_label.setText("Connected")
         self.status_label.setStyleSheet("color: green; font-weight: bold;")
         self.statusBar().showMessage("Connected!", 0)
@@ -412,6 +435,14 @@ class ODriveGUI(QMainWindow):
         self.stop_button.setEnabled(enabled)
         self.state_combo.setEnabled(enabled)
         self.calib_button.setEnabled(enabled)
+        self.controls_group.setEnabled(enabled)
+
+    @Slot(bool)
+    def _on_controls_collapsed(self, checked):
+        """Collapse/expand the Control Settings panel contents."""
+        self.input_selector.setVisible(checked)
+        self.control_params.setVisible(checked)
+        self.limits_tabs.setVisible(checked)
 
     # ── Control handlers ──────────────────────────────────────────────
 
@@ -764,7 +795,7 @@ class ODriveGUI(QMainWindow):
         # Fallback disconnect detection (primary is _on_lost)
         if any_failed:
             self._read_fail_count += 1
-            if self._read_fail_count % 10 == 0:
+            if self._read_fail_count == RECONNECT_FAIL_THRESHOLD:
                 logger.debug("update_readings: %d consecutive read failures", self._read_fail_count)
             if (not self._connecting
                     and self._read_fail_count >= RECONNECT_FAIL_THRESHOLD):

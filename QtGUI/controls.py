@@ -1,0 +1,378 @@
+"""
+Control Settings panel for the ODrive Qt GUI - Phase 1 (Plan.md §1).
+
+Layout (one level up for control params, which are config-editor values):
+
+    Control Settings (collapsible, main.py)
+      ├─ Input Mode selector
+      ├─ Control Parameters            (gains / integrators / feed-forward)
+      └─ Limits (QTabWidget)
+            ├─ Electrical Limits
+            └─ Mechanical Limits
+
+Values are read from the device on connect and written back on change.
+Feature-gating (Plan.md §4.2) uses `hasattr` checks: any parameter the
+attached firmware does not expose is disabled. Portable by design
+(Plan.md §4.5): values are read from the connected device, never assumed.
+"""
+
+import logging
+
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QGridLayout,
+    QGroupBox,
+    QLabel,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+from PySide6.QtCore import Slot
+
+from odrive.enums import (
+    INPUT_MODE_PASSTHROUGH,
+    INPUT_MODE_POS_FILTER,
+    INPUT_MODE_TORQUE_RAMP,
+    INPUT_MODE_TRAP_TRAJ,
+    INPUT_MODE_VEL_RAMP,
+)
+
+logger = logging.getLogger(__name__)
+
+# Input modes exposed in the selector (Plan.md §1.2). Value -> display label.
+INPUT_MODES = {
+    INPUT_MODE_PASSTHROUGH: "Passthrough (1)",
+    INPUT_MODE_VEL_RAMP: "Velocity Ramp (2) — recommended",
+    INPUT_MODE_POS_FILTER: "Position Filter (3)",
+    INPUT_MODE_TRAP_TRAJ: "Trapezoidal Trajectory (5)",
+    INPUT_MODE_TORQUE_RAMP: "Torque Ramp (6)",
+}
+
+BASE_CONTROLLER = "controller"
+BASE_MOTOR = "motor"
+BASE_ODRIVE = "odrive"
+
+
+class InputModeSelector(QComboBox):
+    """Selector for the velocity/position input mode.
+
+    `input_mode` is orthogonal to `control_mode`: it selects how the user
+    setpoint is turned into the controller setpoint (e.g. VEL_RAMP adds an
+    acceleration-limited ramp to a velocity command, TORQUE_RAMP only applies
+    to TORQUE_CONTROL mode).
+    """
+
+    def __init__(self, status=None, parent=None):
+        super().__init__(parent)
+        self._status = status
+        self._controller = None
+        self._syncing = False
+        self._order = list(INPUT_MODES.values())
+        self.addItems(self._order)
+        self.currentTextChanged.connect(self._on_changed)
+        self.setToolTip(
+            "How the axis setpoint is derived from the input.\n"
+            "VEL_RAMP (2) adds an acceleration limit via 'vel_ramp_rate' — "
+            "recommended for smooth ramps.\n"
+            "TORQUE_RAMP (6) only applies in TORQUE_CONTROL mode."
+        )
+
+    @property
+    def input_mode(self):
+        for value, label in INPUT_MODES.items():
+            if label == self.currentText():
+                return value
+        return None
+
+    def bind(self, controller):
+        """Attach a controller and load its current input_mode."""
+        self._controller = controller
+        self._syncing = True
+        try:
+            if controller is not None and hasattr(controller.config, "input_mode"):
+                self.setCurrentText(INPUT_MODES.get(controller.config.input_mode, ""))
+            else:
+                self.setCurrentText("")
+                self.setEnabled(False)
+        finally:
+            self._syncing = False
+
+    @Slot()
+    def _on_changed(self):
+        if self._syncing or self._controller is None:
+            return
+        value = self.input_mode
+        if value is None:
+            return
+        try:
+            self._controller.config.input_mode = value
+            if self._status:
+                self._status(f"Input mode set to {self.currentText()}", 3000)
+        except Exception as e:
+            logger.warning("Failed to set input_mode: %s", e)
+            if self._status:
+                self._status(f"Failed to set input mode: {e}", 3000)
+
+
+class _RowConfigPanel(QGroupBox):
+    """Shared logic for the two config panels: build rows of spinboxes and
+    checkboxes into provided grid layouts, then read-on-bind / write-on-change
+    with `hasattr` feature gating."""
+
+    _SPINS = ()   # subclass: (attr, base, label, unit, min, max, decimals, step)
+    _CHECKS = ()  # subclass: (attr, base, label)
+
+    def __init__(self, title, status=None, parent=None):
+        super().__init__(title, parent)
+        self._status = status
+        self._controller = None
+        self._motor = None
+        self._odrive = None
+        self._syncing = False
+        self._spin_boxes = {}
+        self._check_boxes = {}
+        self._bases = {}
+
+    # -- row building --------------------------------------------------
+
+    def _new_spin(self, spec):
+        """Build a spinbox. `spec` may carry trailing group fields; only the
+        range/decimals live at fixed indices."""
+        _min, _max, dec, step = (float(spec[4]), float(spec[5]), spec[6], spec[7])
+        sb = QDoubleSpinBox()
+        sb.setRange(_min, _max)
+        sb.setDecimals(dec)
+        sb.setSingleStep(step)
+        sb.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
+        sb.valueChanged.connect(self._on_spin_changed)
+        return sb
+
+    def _place_spin(self, layout, row, col, spec):
+        attr, base, label, unit, *_ = spec
+        text = f"{label} ({unit})" if unit else label
+        lbl = QLabel(text)
+        tip = f"{base}.config.{attr}"
+        if attr == "requested_current_range":
+            tip += (
+                "\nMax 60 A on this controller. Should be > "
+                "current_lim + current_lim_margin, but as low as "
+                "possible for best resolution."
+            )
+        lbl.setToolTip(tip)
+        sb = self._new_spin(spec)
+        layout.addWidget(lbl, row, col)
+        layout.addWidget(sb, row, col + 1)
+        self._spin_boxes[attr] = sb
+        self._bases[attr] = base
+
+    def _place_check(self, layout, row, col, check):
+        attr, base, label, *_ = check
+        cb = QCheckBox(label)
+        cb.setToolTip(f"{base}.config.{attr}")
+        cb.toggled.connect(self._on_check_toggled)
+        layout.addWidget(cb, row, col, 1, 2)
+        self._check_boxes[attr] = cb
+        self._bases[attr] = base
+
+    def _write_scalar_rows(self, layout, start_row=0):
+        """Fill `layout` with spinbox/checkbox rows in a two-column grid.
+
+        Only parameters with the *same* group tag share a line; an unmatched
+        item leaves its second slot empty rather than being paired arbitrarily.
+
+            | Current limit (A)[   ]  Current limit margin (A)[   ] |   (group "cur")
+            | Requested range (A)[  ]                                |   (group "rng")
+        """
+        row = start_row
+        spins = list(self._SPINS)
+        i = 0
+        while i < len(spins):
+            group = spins[i][-1]
+            self._place_spin(layout, row, 0, spins[i])
+            i += 1
+            if i < len(spins) and spins[i][-1] == group:
+                self._place_spin(layout, row, 2, spins[i])
+                i += 1
+            row += 1
+        checks = list(self._CHECKS)
+        j = 0
+        while j < len(checks):
+            group = checks[j][-1]
+            self._place_check(layout, row, 0, checks[j])
+            j += 1
+            if j < len(checks) and checks[j][-1] == group:
+                self._place_check(layout, row, 2, checks[j])
+                j += 1
+            row += 1
+        return row
+
+    # -- device sync / writes -----------------------------------------
+
+    def bind(self, controller, motor, odrive):
+        """Attach device refs and (re)load values + feature availability."""
+        self._controller = controller
+        self._motor = motor
+        self._odrive = odrive
+        if controller is None:
+            self.setEnabled(False)
+            return
+        self.setEnabled(True)
+        self._sync_from_device()
+
+    def _obj(self, attr):
+        base = self._bases[attr]
+        if base == BASE_MOTOR:
+            return self._motor
+        if base == BASE_ODRIVE:
+            return self._odrive
+        return self._controller
+
+    def _sync_from_device(self):
+        self._syncing = True
+        try:
+            for attr, box in self._spin_boxes.items():
+                obj = self._obj(attr)
+                enabled = obj is not None and hasattr(obj.config, attr)
+                box.blockSignals(True)
+                box.setEnabled(enabled)
+                if enabled:
+                    try:
+                        box.setValue(float(getattr(obj.config, attr)))
+                    except Exception as e:
+                        box.setEnabled(False)
+                        logger.debug("read %s failed: %s", attr, e)
+                box.blockSignals(False)
+            for attr, cb in self._check_boxes.items():
+                obj = self._obj(attr)
+                enabled = obj is not None and hasattr(obj.config, attr)
+                cb.blockSignals(True)
+                cb.setEnabled(enabled)
+                if enabled:
+                    try:
+                        cb.setChecked(bool(getattr(obj.config, attr)))
+                    except Exception:
+                        pass
+                cb.blockSignals(False)
+        finally:
+            self._syncing = False
+
+    def _on_spin_changed(self, value):
+        if self._syncing:
+            return
+        attr = next((a for a, b in self._spin_boxes.items()
+                     if b.sender() == self.sender()), None)
+        if attr is None:
+            return
+        obj = self._obj(attr)
+        try:
+            setattr(obj.config, attr, value)
+        except Exception as e:
+            logger.warning("Failed to set %s: %s", attr, e)
+            if self._status:
+                self._status(f"Failed to set {attr}: {e}", 3000)
+
+    def _on_check_toggled(self, checked):
+        if self._syncing:
+            return
+        cb = self.sender()
+        attr = next((a for a, b in self._check_boxes.items() if b == cb), None)
+        if attr is None:
+            return
+        obj = self._obj(attr)
+        try:
+            setattr(obj.config, attr, bool(checked))
+        except Exception as e:
+            logger.warning("Failed to set %s: %s", attr, e)
+            if self._status:
+                self._status(f"Failed to set {attr}: {e}", 3000)
+
+
+class ControlParamsGroup(_RowConfigPanel):
+    """Control parameters (gains / integrators / feed-forward) — promoted one
+    level up in the layout so it sits with the config-editor controls rather
+    than being buried inside the limits tab widget."""
+
+    TITLE = "Control Parameters"
+
+    _SPINS = [
+        ("vel_gain", BASE_CONTROLLER, "Velocity gain", "N·m/(turn/s)", 0.0, 10.0, 4, 0.001, "vel"),
+        ("vel_integrator_gain", BASE_CONTROLLER, "Vel. integrator gain", "N·m/turn", 0.0, 10.0, 4, 0.001, "int"),
+        ("vel_integrator_limit", BASE_CONTROLLER, "Vel. integrator limit", "N·m", 0.0, 50.0, 3, 0.1, "int"),
+        ("pos_gain", BASE_CONTROLLER, "Position gain", "(turn/s)/turn", 0.0, 100.0, 3, 0.1, "pos"),
+        ("inertia", BASE_CONTROLLER, "Inertia (feed-forward)", "N·m/(turn/s²)", -50.0, 50.0, 4, 0.001, "inertia"),
+    ]
+    _CHECKS = [
+        ("enable_gain_scheduling", BASE_CONTROLLER, "Gain scheduling", "gs"),
+    ]
+
+    def __init__(self, status=None, parent=None):
+        super().__init__(self.TITLE, status, parent)
+        layout = QGridLayout(self)
+        layout.setVerticalSpacing(3)
+        layout.setHorizontalSpacing(12)
+        self._write_scalar_rows(layout, start_row=0)
+        self.setEnabled(False)
+
+
+class LimitsTabs(_RowConfigPanel):
+    """Tab widget for the two limit categories (speed/torque + electrical)."""
+
+    TITLE = "Limits"
+
+    _TABS = ("Electrical Limits", "Mechanical Limits")
+
+    # (attr, base, label, unit, min, max, decimals, step, tab, group)
+    _SPINS = [
+        ("current_lim", BASE_MOTOR, "Current limit", "A", 0.0, 60.0, 2, 0.1, 0, "cur"),
+        ("current_lim_margin", BASE_MOTOR, "Current limit margin", "A", 0.0, 60.0, 2, 0.1, 0, "cur"),
+        ("requested_current_range", BASE_MOTOR, "Requested current range", "A", 0.0, 60.0, 1, 0.5, 0, "rng"),
+        ("dc_max_positive_current", BASE_ODRIVE, "DC +ve current limit (PSU)", "A", 0.0, 60.0, 1, 0.5, 0, "dc"),
+        ("dc_max_negative_current", BASE_ODRIVE, "DC -ve current limit (regen)", "A", -60.0, 0.0, 2, 0.1, 0, "dc"),
+        ("dc_bus_overvoltage_trip_level", BASE_ODRIVE, "DC overvoltage trip", "V", 0.0, 60.0, 1, 0.5, 0, "ov"),
+        ("vel_limit", BASE_CONTROLLER, "Velocity limit", "turn/s", 0.0, 200.0, 1, 0.5, 1, "vel"),
+        ("torque_lim", BASE_MOTOR, "Torque limit", "N·m", 0.0, 50.0, 3, 0.1, 1, "tor"),
+    ]
+    # (attr, base, label, tab, group)
+    _CHECKS = [
+        ("enable_vel_limit", BASE_CONTROLLER, "Enable velocity limit", 1, "vl"),
+        ("enable_torque_mode_vel_limit", BASE_CONTROLLER, "Torque-mode velocity limit", 1, "vl"),
+        ("enable_overspeed_error", BASE_CONTROLLER, "Overspeed error", 1, "ov"),
+    ]
+
+    def __init__(self, status=None, parent=None):
+        super().__init__(self.TITLE, status, parent)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self._tabs = QTabWidget()
+        outer.addWidget(self._tabs)
+
+        pages = []
+        for name in self._TABS:
+            page = QWidget()
+            lay = QGridLayout(page)
+            lay.setVerticalSpacing(3)
+            lay.setHorizontalSpacing(12)
+            self._tabs.addTab(page, name)
+            pages.append((page, lay))
+
+        # De-annotate free-form _SPINS/_CHECKS in __init__: each row carries a
+        # trailing tab index and a line-group tag, which we strip before
+        # delegating to the base.
+        self._spin_specs = {}
+        self._check_specs = {}
+        for spec in self._SPINS:
+            *scalar, tab, group = spec
+            self._spin_specs[tab] = self._spin_specs.get(tab, []) + [tuple(scalar + [group])]
+        for spec in self._CHECKS:
+            attr, base, label, tab, group = spec
+            self._check_specs[tab] = self._check_specs.get(tab, []) + [(attr, base, label, group)]
+
+        # Temporarily swap in per-tab specs so the base writer fills each page.
+        for tab_idx, (page, lay) in enumerate(pages):
+            self._SPINS = tuple(self._spin_specs.get(tab_idx, []))
+            self._CHECKS = tuple(self._check_specs.get(tab_idx, []))
+            self._write_scalar_rows(lay, start_row=0)
+
+        self.setEnabled(False)
