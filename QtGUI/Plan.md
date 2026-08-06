@@ -506,3 +506,4 @@ corresponds to `pole_pairs = 8` in the working device config.
 | 2025-08 | Axis-state dropdown uses friendly labels ("Lock-In Spin", "Motor Calibration", …) instead of raw enum names; mapping unchanged. |
 | 2025-08 | Renamed the axis-state dropdown label "State:" -> "Programm:" and the button "Execute State" -> "Start". |
 | 2025-08 | Footer state field shows friendly names: "Idle", "Control Loop", "Calibration: <Programm>" (preferring the dropdown program labels), with the redundant "State:" prefix dropped for a uniform footer. |
+| 2025-08 | Consolidated "Control Parameters" into the settings as a third tab (Electrical Limits | Mechanical Limits | Control Parameters), replacing the separate control-params section. |

@@ -36,7 +36,7 @@ import odrive.configuration
 import odrive.enums
 
 # Phase 1: Control Settings (Plan.md §1)
-from controls import ControlParamsGroup, InputModeSelector, LimitsTabs
+from controls import InputModeSelector, SettingsTabs
 
 # Phase 2: Error display & history (Plan.md §2)
 from monitoring import ErrorDialog, read_error_report
@@ -370,10 +370,8 @@ class ODriveGUI(QMainWindow):
         self.controls_group.setChecked(True)
         self.controls_group.setToolTip("Untick to collapse")
         cg_layout = QVBoxLayout(self.controls_group)
-        self.control_params = ControlParamsGroup(self.statusBar().showMessage)
-        self.limits_tabs = LimitsTabs(self.statusBar().showMessage)
-        cg_layout.addWidget(self.control_params)
-        cg_layout.addWidget(self.limits_tabs)
+        self.settings_tabs = SettingsTabs(self.statusBar().showMessage)
+        cg_layout.addWidget(self.settings_tabs)
         self.controls_group.toggled.connect(self._on_controls_collapsed)
         main_layout.addWidget(self.controls_group)
 
@@ -470,8 +468,7 @@ class ODriveGUI(QMainWindow):
 
         # Phase 1 control settings: load current device values + feature gate
         self.input_selector.bind(self.controller)
-        self.control_params.bind(self.controller, self.motor, self.odrive)
-        self.limits_tabs.bind(self.controller, self.motor, self.odrive)
+        self.settings_tabs.bind(self.controller, self.motor, self.odrive)
         # Show the device's actual setpoint on connect.
         self._sync_setpoint_from_device()
 
@@ -532,8 +529,7 @@ class ODriveGUI(QMainWindow):
     @Slot(bool)
     def _on_controls_collapsed(self, checked):
         """Collapse/expand the Control Settings panel contents."""
-        self.control_params.setVisible(checked)
-        self.limits_tabs.setVisible(checked)
+        self.settings_tabs.setVisible(checked)
 
     # ── Control handlers ──────────────────────────────────────────────
 

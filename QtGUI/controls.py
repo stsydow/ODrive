@@ -348,56 +348,41 @@ class _RowConfigPanel(QGroupBox):
                 self._status(f"Failed to set {attr}: {e}", 3000)
 
 
-class ControlParamsGroup(_RowConfigPanel):
-    """Control parameters (gains / integrators / feed-forward) — promoted one
-    level up in the layout so it sits with the config-editor controls rather
-    than being buried inside the limits tab widget."""
+class SettingsTabs(_RowConfigPanel):
+    """Consolidated settings as three tabs (Plan.md §1.1/§1.2):
 
-    TITLE = "Control Parameters"
+      Electrical Limits | Mechanical Limits | Control Parameters
+    """
 
-    _SPINS = [
-        ("vel_gain", BASE_CONTROLLER, "Velocity gain", "N·m/(turn/s)", 0.0, 10.0, 4, 0.001, "vel"),
-        ("vel_integrator_gain", BASE_CONTROLLER, "Vel. integrator gain", "N·m/turn", 0.0, 10.0, 4, 0.001, "int"),
-        ("vel_integrator_limit", BASE_CONTROLLER, "Vel. integrator limit", "N·m", 0.0, 50.0, 3, 0.1, "int"),
-        ("pos_gain", BASE_CONTROLLER, "Position gain", "(turn/s)/turn", 0.0, 100.0, 3, 0.1, "pos"),
-        ("inertia", BASE_CONTROLLER, "Inertia (feed-forward)", "N·m/(turn/s²)", -50.0, 50.0, 4, 0.001, "inertia"),
-    ]
-    _CHECKS = [
-        ("enable_gain_scheduling", BASE_CONTROLLER, "Gain scheduling", "gs"),
-    ]
+    TITLE = "Settings"
 
-    def __init__(self, status=None, parent=None):
-        super().__init__(self.TITLE, status, parent)
-        layout = QGridLayout(self)
-        layout.setVerticalSpacing(3)
-        layout.setHorizontalSpacing(12)
-        self._write_scalar_rows(layout, start_row=0)
-        self.setEnabled(False)
-
-
-class LimitsTabs(_RowConfigPanel):
-    """Tab widget for the two limit categories (speed/torque + electrical)."""
-
-    TITLE = "Limits"
-
-    _TABS = ("Electrical Limits", "Mechanical Limits")
+    _TABS = ("Electrical Limits", "Mechanical Limits", "Control Parameters")
 
     # (attr, base, label, unit, min, max, decimals, step, tab, group)
     _SPINS = [
+        # tab 0: Electrical Limits
         ("current_lim", BASE_MOTOR, "Current limit", "A", 0.0, 60.0, 2, 0.1, 0, "cur"),
         ("current_lim_margin", BASE_MOTOR, "Current limit margin", "A", 0.0, 60.0, 2, 0.1, 0, "cur"),
         ("requested_current_range", BASE_MOTOR, "Requested current range", "A", 0.0, 60.0, 1, 0.5, 0, "rng"),
         ("dc_max_positive_current", BASE_ODRIVE, "DC +ve current limit (PSU)", "A", 0.0, 60.0, 1, 0.5, 0, "dc"),
         ("dc_max_negative_current", BASE_ODRIVE, "DC -ve current limit (regen)", "A", -60.0, 0.0, 2, 0.1, 0, "dc"),
         ("dc_bus_overvoltage_trip_level", BASE_ODRIVE, "DC overvoltage trip", "V", 0.0, 60.0, 1, 0.5, 0, "ov"),
+        # tab 1: Mechanical Limits
         ("vel_limit", BASE_CONTROLLER, "Velocity limit", "turn/s", 0.0, 200.0, 1, 0.5, 1, "vel"),
         ("torque_lim", BASE_MOTOR, "Torque limit", "N·m", 0.0, 50.0, 3, 0.1, 1, "tor"),
+        # tab 2: Control Parameters
+        ("vel_gain", BASE_CONTROLLER, "Velocity gain", "N·m/(turn/s)", 0.0, 10.0, 4, 0.001, 2, "vel"),
+        ("vel_integrator_gain", BASE_CONTROLLER, "Vel. integrator gain", "N·m/turn", 0.0, 10.0, 4, 0.001, 2, "int"),
+        ("vel_integrator_limit", BASE_CONTROLLER, "Vel. integrator limit", "N·m", 0.0, 50.0, 3, 0.1, 2, "int"),
+        ("pos_gain", BASE_CONTROLLER, "Position gain", "(turn/s)/turn", 0.0, 100.0, 3, 0.1, 2, "pos"),
+        ("inertia", BASE_CONTROLLER, "Inertia (feed-forward)", "N·m/(turn/s²)", -50.0, 50.0, 4, 0.001, 2, "inertia"),
     ]
     # (attr, base, label, tab, group)
     _CHECKS = [
         ("enable_vel_limit", BASE_CONTROLLER, "Enable velocity limit", 1, "vl"),
         ("enable_torque_mode_vel_limit", BASE_CONTROLLER, "Torque-mode velocity limit", 1, "vl"),
         ("enable_overspeed_error", BASE_CONTROLLER, "Overspeed error", 1, "ov"),
+        ("enable_gain_scheduling", BASE_CONTROLLER, "Gain scheduling", 2, "gs"),
     ]
 
     def __init__(self, status=None, parent=None):

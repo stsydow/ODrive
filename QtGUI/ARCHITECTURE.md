@@ -19,8 +19,7 @@ These project-wide rules must hold for every feature; implementation specifics a
 QtGUI/main.py
   │
   ├── controls.py                     # Phase 1: Control Settings
-  │     ├── ControlParamsGroup(QGroupBox)  # velocities/integrator/pos gains, inertia
-  │     ├── LimitsTabs(QTabWidget)         # Electrical + Mechanical limit tabs
+  │     ├── SettingsTabs(QTabWidget)       # Electrical | Mechanical | Control Params
   │     └── InputModeSelector(QComboBox)
   ├── monitoring.py                   # Phase 2: Error decode + on-demand dialog
   │     ├── read_error_report(odrv, axis)  # structured decode (system/axis/motor/enc/ctl...)
@@ -97,12 +96,9 @@ QtGUI/main.py
 │  Position Setpoint (rev): [   0.0000  ▲▼ ] est: 1.23 rev│← hidden │
 ├──────────────────────────────────────────────────┤
 │  ☑ Control Settings  (Phase 1, collapsible)       │
-│  Input Mode: [Velocity Ramp (2) — recommended ▾]  │
-│  ▍ Control Parameters  (vel_gain, integrators, inertia) │
-│   [Vel gain (N·m/(t/s)) ___]  [Vel int gain (N·m/t)___]│
 │  ┌──────────────────────────────────────────────┐ │
-│  │ [Electrical Limits | Mechanical Limits]      │ │
-│  │  [Cur lim (A)___]  [Cur lim margin (A)___]  │ │
+│  │ [Electrical | Mechanical | Control Params]  │ │
+│  │   tab rows: [Par (unit)___] [Par (unit)___] │ │
 │  └──────────────────────────────────────────────┘ │
 ├──────────────────────────────────────────────────┤
 │  [Ready...]  ●Online  State:CLS_LOOP  Err:OK  24.5V  49.0W │  ← status bar
