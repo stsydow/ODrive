@@ -7,6 +7,19 @@ decisions are included.
 
 ---
 
+## Design Principles
+
+Project-wide rules. Implementation specifics (close behaviour, Ctrl+C, threading) live in `ARCHITECTURE.md`.
+
+**The GUI is a monitor / settings interface, not a controller.**
+
+- It **never performs realtime control** and never should be required to. Safety (limits, error-stops, velocity/current limiting) is enforced by the **firmware + controller**.
+- The UI may write a setpoint or select a mode, but **does not drive or supervise** the control loop. Once a speed is set, **the motor keeps running independently** of the GUI.
+- **Closing the GUI, reconnecting, or losing connection never stops the motor.** The GUI commands the device only through explicit user actions: **Run (Closed Loop)**, **Stop (Idle)**, and **Execute State**.
+- Connect/disconnect transitions only tear down GUI references — there are **no implicit writes** to `requested_state`.
+
+---
+
 ## 1. Hardware & Firmware Context
 
 ### Machine
@@ -329,6 +342,10 @@ The GUI and all features must work with a different motor and PSU than this sewi
 - Calibration (Phase 4.2) uses the *device's existing* values as the starting point and validates consistency (CPR = 6 × pole_pairs) rather than assuming 8 pole pairs / CPR 48.
 - Machine-specific assumptions (belt ratio, SPM, pole count, PSU rating) are explicitly local to this setup and flagged as such.
 
+### 4.6 UI is a monitor / settings interface, not a controller
+
+General project rule — see **Design Principles** at the top of this document. Implementation details of close/Ctrl+C behaviour are in `ARCHITECTURE.md`.
+
 ---
 
 ## 5. Dependencies
@@ -442,3 +459,4 @@ corresponds to `pole_pairs = 8` in the working device config.
 | 2025-08 | Review fixes: reconnect threshold confirmed as 5 consecutive failures (~0.5 s) — corrected code + ARCHITECTURE.md (was 50/~5 s). Removed module line-count estimates in §1.3/§2.5 in favour of feature descriptions. Corrected `vel_integrator_gain` units (N·m/turn). Calibration wizard now detects `pre_calibrated` and offers Skip / stage-then-confirm Recalibrate. Split friction compensation out of the GUI-only measurement into an explicit standalone firmware stage. Device menu: "Dump Errors…"/"Clear Errors" replaced by a single "Errors…" action opening the new error panel. |
 | 2025-08 | Final baseline decisions: `vel_limit` kept at **70** (was 66.7) — any value >50 is practically no-limit since torque/current caps out first; `input_mode = VEL_RAMP (2)` everywhere. `vel_integrator_limit` set to **0.188 N·m** (42BLF03 rated continuous torque, ~25 % of peak) instead of 10.0, so the integrator can't demand more torque than the motor can continuously produce (community heuristic is ~50 % of peak torque — a tighter cap chosen deliberately). |
 | 2025-08 | Web review: added hall low-speed performance context (§4.1) with community references; documented why `TORQUE_RAMP` + `torque_ramp_rate` does not work in `VELOCITY` mode — see §4.4 future-torque-filter note. Corrected the control_mode enum: `CONTROL_MODE_VELOCITY_CONTROL = 2` (not 1), `TORQUE=1`. Added §4.5 Portability — Annex A is reference context only, never assumed as the live device state; features are motor/PSU-agnostic. |
+| 2025-08 | Added a top-level **Design Principles** section (UI is a monitor/settings interface, not a controller — never required for realtime control; closing/reconnecting/Ctrl+C never stops the motor; explicit Run/Stop/Execute-State only; no implicit `requested_state` writes; safety is the firmware/controller's job). §4.6 now cross-references it; the close/Ctrl+C *implementation* details moved to `ARCHITECTURE.md`. Ctrl+C switched to OS-level `SIG_DFL` (a Python `KeyboardInterrupt` isn't serviced while the Qt C++ event loop runs). Removed implicit `requested_state = IDLE` from `closeEvent` and reconnect cleanup. |

@@ -5,6 +5,7 @@ ODrive Qt GUI - Velocity control focused interface for ODrive Axis 0.
 
 import logging
 import os
+import signal
 import sys
 import threading
 
@@ -308,13 +309,13 @@ class ODriveGUI(QMainWindow):
         main_layout.addWidget(readings_group)
 
     def closeEvent(self, event):
-        """Clean up on window close."""
+        """Clean up on window close.
+
+        UI-only: never touches the motor. The motor keeps running after the
+        GUI is closed (see Plan.md §4.6). Only the explicit Stop button or a
+        user-selected axis state commands the device.
+        """
         self.update_timer.stop()
-        if self.odrive is not None:
-            try:
-                self.axis.requested_state = AXIS_STATE_IDLE
-            except Exception:
-                pass
         event.accept()
 
     # ── Connection ────────────────────────────────────────────────────
@@ -328,13 +329,8 @@ class ODriveGUI(QMainWindow):
         logger.debug("connect_odrive: called (odrive=%s, axis=%s)",
                      self.odrive is not None, self.axis is not None)
 
-        # Clean up stale references
+        # Clean up stale references (UI-only: never stops the motor)
         if self.odrive is not None:
-            try:
-                self.axis.requested_state = AXIS_STATE_IDLE
-                logger.debug("connect_odrive: set axis to IDLE")
-            except Exception as ex:
-                logger.debug("connect_odrive: set IDLE failed: %s", ex)
             self.axis = None
             self.motor = None
             self.encoder = None
@@ -828,6 +824,15 @@ def main():
 
     window = ODriveGUI(verbose=args.verbose)
     window.show()
+
+    # Ctrl+C should terminate the UI reliably from any state (including while
+    # "finding device"). The Qt event loop is a blocking C++ call, so a Python
+    # KeyboardInterrupt is *not* serviced during exec() — a timer "nudge" is
+    # unreliable. Restoring the default SIGINT action kills the process at the
+    # OS level, always. This is safe because the UI is monitor/settings only
+    # and never drives realtime control (Plan.md §4.6): the motor keeps
+    # running independently.
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
 
     sys.exit(app.exec())
 

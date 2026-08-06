@@ -3,13 +3,23 @@
 A lightweight PySide6 desktop GUI for monitoring and controlling a single ODrive axis.  
 Designed for **velocity control** as the primary use case, with position and torque modes available.
 
+## Design Principles
+
+These project-wide rules must hold for every feature; implementation specifics are documented below and in the relevant code sections.
+
+- **The GUI is a monitor / settings interface, not a controller.** It never performs realtime control and never should be required to. Safety (limits, error-stops, velocity/current limiting) is enforced by the **firmware + controller**.
+- The UI may write a setpoint or select a mode, but **does not drive or supervise** the control loop. Once a speed is set, **the motor keeps running independently** of the GUI.
+- **Closing the GUI, reconnecting, or losing connection never stops the motor.** The GUI commands the device only through explicit user actions: **Run (Closed Loop)**, **Stop (Idle)**, and **Execute State**.
+- Connect/disconnect transitions only tear down GUI references — there are **no implicit writes** to `requested_state`.
+
 ## Architecture
 
 ```
 QtGUI/main.py
   │
   ├── controls.py                     # Phase 1: Control Settings
-  │     ├── GainsPanel(QGroupBox)     #   live-editable gains/limits/feed-fwd
+  │     ├── ControlParamsGroup(QGroupBox)  # velocities/integrator/pos gains, inertia
+  │     ├── LimitsTabs(QTabWidget)         # Electrical + Mechanical limit tabs
   │     └── InputModeSelector(QComboBox)
   │
   ├── ODriveGUI(QMainWindow)          # Main window, owns all UI & state
@@ -20,7 +30,7 @@ QtGUI/main.py
   │     ├── _on_device_lost()         # Library notification → auto-reconnect
   │     ├── sync_ui_from_controller() # Poll controller.control_mode → update combo + spinboxes
   │     ├── update_readings()         # 100ms timer: read all values, detect disconnect
-  │     └── closeEvent()              # Stop axis, prevent reconnect
+  │     └── closeEvent()              # Stop poll timer (UI-only; motor keeps running)
   │
   ├── Module-level constants
   │     ├── MODE_NAMES / MODE_VALUES  # control_mode enum ↔ display name
@@ -120,6 +130,8 @@ QtGUI/main.py
 | **Persistent status bar messages** | `showMessage(text, 0)` is used for connection progress ("Finding ODrive...", "Connected!") so they don't disappear after the default 3 s timeout. Action messages (save, export) still use the default transient timeout. |
 | **Debug menu** | A Debug menu provides verbose logging toggle, force reconnect, and device info — useful for diagnosing connection issues without restarting the GUI. |
 | **No connect/disconnect button** | Auto-connect on startup + auto-reconnect on loss makes a manual button redundant. The status bar shows the current state. |
+| **UI never stops the motor (monitor-only)** | Per the general project rule, closing the window or reconnecting must not command the device. `closeEvent()` only stops the poll timer; reconnect only tears down GUI references. The motor is commanded **exclusively** via the explicit Run / Stop / Execute-State actions. |
+| **Ctrl+C via `SIG_DFL`** | The Qt event loop is a blocking C++ call, so a Python `KeyboardInterrupt` is not serviced during `app.exec()` (a timer "nudge" is unreliable). Restoring the default SIGINT action (`signal.signal(SIGINT, SIG_DFL)`) makes Ctrl+C terminate the process at the OS level, reliably from any state (including while "finding device"). Safe because the GUI is monitor-only. |
 
 ## Threading Model
 
