@@ -178,9 +178,9 @@ class AxisErrors:
 
 #### 2.5 Integration
 
-- `monitoring.py` (new) provides: structured error decoding (`ErrorReport`/`AxisErrors` dataclasses), the color-coded error panel replacing the raw-integer error label, and the time-stamped error history (export-to-file).
+- `monitoring.py` (new) provides: structured error decoding (`ErrorReport`/`ErrorModule` dataclasses), an on-demand `ErrorDialog` (decoded current errors + time-stamped history, export-to-file) that replaces the raw-integer error label, and a bounded history kept by the poll.
 - `controls.py` (new) also provides the read-only Config Browser dialog (`QDialog` + `QTreeWidget`).
-- Device menu: replace the standalone "Dump Errors…" and "Clear Errors" actions with a single "Errors…" action that opens the new error panel/history view, plus add "Config Browser…".
+- Device menu: the standalone "Dump Errors…"/"Clear Errors" become a single "Errors…" action (plus a clickable `Err:` footer field) that opens the error dialog; "Config Browser…" still to be added.
 
 ### Phase 3: Monitoring & Plotting (NEXT)
 
@@ -494,3 +494,5 @@ corresponds to `pole_pairs = 8` in the working device config.
 | 2025-08 | Calibration finalize: after calibration + a functional test, set `encoder.config.pre_calibrated = true` (and motor `pre_calibrated` when applicable) then save. Saving rule added to Design Principles: any `save_configuration` is an explicit, user-confirmed action that puts the device into IDLE first. |
 | 2025-08 | Optional/"maybe-none" value access: added a shared `maybe_read(fn, default=None)` helper and a general rule (Plan.md §4.1) — no scattered `try/except: pass`; optional reads default to None, while disconnect-distinguishing reads and writes keep explicit targeted try/except. Refactored the state/live reads to use it. |
 | 2025-08 | Fix: on switching to closed-loop (and on connect), the active setpoint display now reads the device's current input setpoint (new `_sync_setpoint_from_device()` per control mode) instead of a stale/reset local value; removed the zeroing of the velocity spinbox on Stop. |
+| 2025-08 | Phase 2 (error display) implemented: new `monitoring.py` with `read_error_report()` (structured decode of system/axis/motor/encoder/controller/sensorless), a live color-coded `ErrorPanel` with a bounded (1000) history and a history dialog (export to file). Replaced the raw error label and the Device menu's "Dump Errors"/"Clear Errors" with the decoded panel + a single "Errors…" history action. Fixed a source-base bug (axis module was reading odrv.error). Config Browser still pending (next). |
+| 2025-08 | Phase 2 (error display): moved the decoded-error view out of the layout (window was too tall) into an on-demand `ErrorDialog` — opened via Device > Errors… or by clicking the `Err:` footer indicator (now a `_ClickableLabel`). The poll keeps decoding into a bounded history; dialog shows current errors + history with clear/export. |

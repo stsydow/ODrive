@@ -22,7 +22,10 @@ QtGUI/main.py
   │     ├── ControlParamsGroup(QGroupBox)  # velocities/integrator/pos gains, inertia
   │     ├── LimitsTabs(QTabWidget)         # Electrical + Mechanical limit tabs
   │     └── InputModeSelector(QComboBox)
-  │
+  ├── monitoring.py                   # Phase 2: Error decode + on-demand dialog
+  │     ├── read_error_report(odrv, axis)  # structured decode (system/axis/motor/enc/ctl...)
+  │     └── ErrorDialog(QDialog)           # current errors + history, clear/export
+  │                                       # opened via Device > Errors… or footer click
   ├── ODriveGUI(QMainWindow)          # Main window, owns all UI & state
   │     ├── setup_ui()                # Layout: Connection, Control, Calibration, Device, Readings
   │     ├── connect_odrive()          # Background thread → odrive.find_any()
@@ -133,6 +136,7 @@ QtGUI/main.py
 | **No connect/disconnect button** | Auto-connect on startup + auto-reconnect on loss makes a manual button redundant. The status bar shows the current state. |
 | **UI never stops the motor (monitor-only)** | Per the general project rule, closing the window or reconnecting must not command the device. `closeEvent()` only stops the poll timer; reconnect only tears down GUI references. The motor is commanded **exclusively** via the explicit Run / Stop / Execute-State actions. |
 | **Ctrl+C via `SIG_DFL`** | The Qt event loop is a blocking C++ call, so a Python `KeyboardInterrupt` is not serviced during `app.exec()` (a timer "nudge" is unreliable). Restoring the default SIGINT action (`signal.signal(SIGINT, SIG_DFL)`) makes Ctrl+C terminate the process at the OS level, reliably from any state (including while "finding device"). Safe because the GUI is monitor-only. |
+| **Errors as an on-demand dialog** | To keep the window compact, decoded errors are shown in an `ErrorDialog` opened from the Device > Errors… menu or by clicking the `Err:` indicator in the status footer (`_ClickableLabel`). The poll decodes errors into a bounded history; the dialog shows current + history with clear/export. |
 | **Confirmed setpoint apply** | The velocity/torque/position spinboxes do **not** write on change. The active setpoint is written to the device only on explicit confirmation — an "Apply Setpoint" button or the Enter key (`lineEdit().returnPressed`). Adjusting a field never moves the motor. |
 | **Control Command gating + state in footer** | The renamed "Control Command" section keeps its mode combo usable when connected, but the setpoint/Apply inputs are enabled only while the axis is in `CLOSED_LOOP_CONTROL` (checked each 100 ms poll). The current axis state is always shown in the status footer (`AXIS_STATE_NAMES` reverse map), not only while running. |
 ## Threading Model

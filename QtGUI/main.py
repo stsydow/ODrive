@@ -8,6 +8,7 @@ import os
 import signal
 import sys
 import threading
+from collections import deque
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -23,7 +24,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QMessageBox,
 )
-from PySide6.QtCore import QTimer, Slot
+from PySide6.QtCore import QTimer, Slot, Signal, Qt
 from PySide6.QtGui import QAction, QFont
 
 # Make the ODrive tools package (tools/odrive) importable when running
@@ -33,10 +34,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..
 import odrive
 import odrive.configuration
 import odrive.enums
-from odrive.utils import dump_errors
 
 # Phase 1: Control Settings (Plan.md §1)
 from controls import ControlParamsGroup, InputModeSelector, LimitsTabs
+
+# Phase 2: Error display & history (Plan.md §2)
+from monitoring import ErrorDialog, format_current, read_error_report
 
 # Import fibre for ObjectLostError disconnect detection
 import fibre
@@ -112,6 +115,16 @@ def maybe_read(fn, default=None):
 
 
 
+class _ClickableLabel(QLabel):
+    """QLabel that emits `clicked` on mouse press (e.g. footer error field)."""
+
+    clicked = Signal()
+
+    def mousePressEvent(self, event):
+        self.clicked.emit()
+        super().mousePressEvent(event)
+
+
 class ODriveGUI(QMainWindow):
     """Main ODrive GUI window - Axis 0 velocity control focused."""
 
@@ -128,6 +141,9 @@ class ODriveGUI(QMainWindow):
         self._read_fail_count = 0
         self._last_synced_mode = None
         self._last_read_error = None
+        self._last_report = None
+        self._last_error_key = None
+        self.error_history = deque(maxlen=1000)
         self._verbose = verbose
 
         self.update_timer = QTimer()
@@ -179,15 +195,10 @@ class ODriveGUI(QMainWindow):
 
         self.device_menu.addSeparator()
 
-        clear_errors_action = QAction("Clear Errors", self)
-        clear_errors_action.setStatusTip("Clear all axis and system errors on the device")
-        clear_errors_action.triggered.connect(self._on_clear_errors)
-        self.device_menu.addAction(clear_errors_action)
-
-        dump_errors_action = QAction("Dump Errors…", self)
-        dump_errors_action.setStatusTip("Print detailed error info to the console")
-        dump_errors_action.triggered.connect(self._on_dump_errors)
-        self.device_menu.addAction(dump_errors_action)
+        errors_action = QAction("Errors…", self)
+        errors_action.setStatusTip("Show decoded errors and error history")
+        errors_action.triggered.connect(self._on_show_error_history)
+        self.device_menu.addAction(errors_action)
 
         self.device_menu.addSeparator()
 
@@ -254,8 +265,11 @@ class ODriveGUI(QMainWindow):
         self.conn_label = QLabel("● Offline")
         self.conn_label.setStyleSheet("color: gray; font-weight: bold; padding: 2px 6px;")
         self.state_status_label = QLabel("State: --")
-        self.error_status_label = QLabel("Err: OK")
+        self.error_status_label = _ClickableLabel("Err: OK")
+        self.error_status_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.error_status_label.setToolTip("Click to open the decoded errors / history")
         self.error_status_label.setStyleSheet("color: gray;")
+        self.error_status_label.clicked.connect(self._on_show_error_history)
         self.vbus_status_label = QLabel("-- V")
         self.power_status_label = QLabel("-- W")
         status_layout.addWidget(self.conn_label)
@@ -361,9 +375,6 @@ class ODriveGUI(QMainWindow):
         readings_layout.addWidget(self.vel_estimate_label)
         self.pos_estimate_label = QLabel("Position Estimate: -- rev")
         readings_layout.addWidget(self.pos_estimate_label)
-        self.error_label = QLabel("Error: None")
-        self.error_label.setStyleSheet("color: red; font-weight: bold;")
-        readings_layout.addWidget(self.error_label)
         readings_group.setLayout(readings_layout)
         main_layout.addWidget(readings_group)
 
@@ -810,36 +821,27 @@ class ODriveGUI(QMainWindow):
         QMessageBox.information(self, "Internal State", "\n".join(lines))
 
     @Slot()
-    def _on_clear_errors(self):
-        """Clear all errors on the device."""
+    def _on_show_error_history(self):
+        """Open the decoded errors / history dialog (Device > Errors… or a
+        click on the footer error indicator)."""
+        if self.odrive is None:
+            QMessageBox.information(self, "Errors", "Not connected")
+            return
+        if self._last_report is None:
+            self._last_report = read_error_report(self.odrive, self.axis)
+        dlg = ErrorDialog(self._last_report, self.error_history,
+                          clear_fn=self._clear_errors, parent=self)
+        dlg.exec()
+
+    def _clear_errors(self):
+        """Clear errors on the device (used by the error dialog)."""
         if self.odrive is None:
             return
         try:
             self.odrive.clear_errors()
-            logger.info("Cleared all errors")
             self.statusBar().showMessage("Cleared all errors", 3000)
         except Exception as e:
-            logger.warning("Failed to clear errors: %s", e)
-            QMessageBox.critical(self, "Clear Errors", f"Failed to clear errors: {e}")
-
-    @Slot()
-    def _on_dump_errors(self):
-        """Capture dump_errors() output and show it in a dialog."""
-        if self.odrive is None:
-            QMessageBox.information(self, "Dump Errors", "Not connected")
-            return
-        try:
-            import io, re
-            buf = io.StringIO()
-            dump_errors(self.odrive, printfunc=lambda x: print(x, file=buf))
-            raw = buf.getvalue()
-            # Strip ANSI colour codes
-            text = re.sub(r"\x1b\[[0-9;]*m", "", raw)
-            logger.info("Error dump:\n%s", text)
-            QMessageBox.information(self, "Error Dump", text.strip())
-        except Exception as e:
-            logger.warning("Failed to dump errors: %s", e)
-            QMessageBox.critical(self, "Dump Errors", f"Failed to dump errors: {e}")
+            self.statusBar().showMessage(f"Failed to clear errors: {e}", 3000)
 
     # ── Readings update ───────────────────────────────────────────────
 
@@ -907,19 +909,25 @@ class ODriveGUI(QMainWindow):
         except Exception as e:
             any_failed |= self._read_failed("pos_estimate", e)
 
-        try:
-            if self.axis.error:
-                self.error_label.setText(f"Error: {self.axis.error}")
-                self.error_label.setStyleSheet("color: red; font-weight: bold;")
-                self.error_status_label.setText(f"Err: {self.axis.error}")
-                self.error_status_label.setStyleSheet("color: red; font-weight: bold;")
-            else:
-                self.error_label.setText("Error: None")
-                self.error_label.setStyleSheet("color: green; font-weight: bold;")
-                self.error_status_label.setText("Err: OK")
-                self.error_status_label.setStyleSheet("color: green; font-weight: bold;")
-        except Exception as e:
-            any_failed |= self._read_failed("axis.error", e)
+        # Phase 2: decode errors; keep footer + bounded history (guarded
+        # optional reads — do not feed the disconnect counter).
+        report = read_error_report(self.odrive, self.axis)
+        self._last_report = report
+        key = tuple(sorted((s.name, tuple(s.errors)) for s in report.sources))
+        if key and key != self._last_error_key:
+            self.error_history.append(report)
+            self._last_error_key = key
+        elif not key:
+            self._last_error_key = None
+        if report.any:
+            union = 0
+            for s in report.sources:
+                union |= s.value
+            self.error_status_label.setText(f"Err: 0x{union:X}")
+            self.error_status_label.setStyleSheet("color: red; font-weight: bold;")
+        else:
+            self.error_status_label.setText("Err: OK")
+            self.error_status_label.setStyleSheet("color: green; font-weight: bold;")
         # Fallback disconnect detection (primary is _on_lost)
         if any_failed:
             self._read_fail_count += 1
