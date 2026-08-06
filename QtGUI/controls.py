@@ -32,6 +32,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Slot
 
 from odrive.enums import (
+    CONTROL_MODE_POSITION_CONTROL,
+    CONTROL_MODE_TORQUE_CONTROL,
+    CONTROL_MODE_VELOCITY_CONTROL,
     INPUT_MODE_PASSTHROUGH,
     INPUT_MODE_POS_FILTER,
     INPUT_MODE_TORQUE_RAMP,
@@ -43,11 +46,11 @@ logger = logging.getLogger(__name__)
 
 # Input modes exposed in the selector (Plan.md §1.2). Value -> display label.
 INPUT_MODES = {
-    INPUT_MODE_PASSTHROUGH: "Passthrough (1)",
-    INPUT_MODE_VEL_RAMP: "Velocity Ramp (2) — recommended",
-    INPUT_MODE_POS_FILTER: "Position Filter (3)",
-    INPUT_MODE_TRAP_TRAJ: "Trapezoidal Trajectory (5)",
-    INPUT_MODE_TORQUE_RAMP: "Torque Ramp (6)",
+    INPUT_MODE_PASSTHROUGH: "Passthrough",
+    INPUT_MODE_VEL_RAMP: "Velocity Ramp",
+    INPUT_MODE_POS_FILTER: "Position Filter",
+    INPUT_MODE_TRAP_TRAJ: "Trapezoidal Trajectory",
+    INPUT_MODE_TORQUE_RAMP: "Torque Ramp",
 }
 
 BASE_CONTROLLER = "controller"
@@ -56,54 +59,110 @@ BASE_ODRIVE = "odrive"
 
 
 class InputModeSelector(QComboBox):
-    """Selector for the velocity/position input mode.
+    """Selector for the input mode, restricted to the current control mode.
 
-    `input_mode` is orthogonal to `control_mode`: it selects how the user
-    setpoint is turned into the controller setpoint (e.g. VEL_RAMP adds an
-    acceleration-limited ramp to a velocity command, TORQUE_RAMP only applies
-    to TORQUE_CONTROL mode).
+    `input_mode` selects how the user setpoint is turned into the controller
+    setpoint. Only modes that apply to the active control mode are shown:
+      velocity -> PASSTHROUGH, VEL_RAMP
+      position -> PASSTHROUGH, POS_FILTER, TRAP_TRAJ
+      torque   -> PASSTHROUGH, TORQUE_RAMP
     """
+
+    # Valid input modes per control mode. Passthrough is an option but is
+    # listed LAST (never the default) when a real shaping mode exists.
+    MODES_BY_CONTROL = {
+        CONTROL_MODE_VELOCITY_CONTROL: [INPUT_MODE_VEL_RAMP, INPUT_MODE_PASSTHROUGH],
+        CONTROL_MODE_POSITION_CONTROL: [INPUT_MODE_POS_FILTER, INPUT_MODE_TRAP_TRAJ, INPUT_MODE_PASSTHROUGH],
+        CONTROL_MODE_TORQUE_CONTROL: [INPUT_MODE_TORQUE_RAMP, INPUT_MODE_PASSTHROUGH],
+    }
+    # Fallback when the device input_mode is inapplicable to the control mode:
+    # use the recommended mode, never Passthrough.
+    DEFAULT_BY_CONTROL = {
+        CONTROL_MODE_VELOCITY_CONTROL: INPUT_MODE_VEL_RAMP,
+        CONTROL_MODE_POSITION_CONTROL: INPUT_MODE_TRAP_TRAJ,
+        CONTROL_MODE_TORQUE_CONTROL: INPUT_MODE_TORQUE_RAMP,
+    }
 
     def __init__(self, status=None, parent=None):
         super().__init__(parent)
         self._status = status
         self._controller = None
-        self._syncing = False
-        self._order = list(INPUT_MODES.values())
-        self.addItems(self._order)
-        self.currentTextChanged.connect(self._on_changed)
+        self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.setToolTip(
-            "How the axis setpoint is derived from the input.\n"
-            "VEL_RAMP (2) adds an acceleration limit via 'vel_ramp_rate' — "
-            "recommended for smooth ramps.\n"
-            "TORQUE_RAMP (6) only applies in TORQUE_CONTROL mode."
+            "How the axis setpoint is derived from the input, for the current "
+            "control mode. VEL_RAMP adds an acceleration limit via "
+            "'vel_ramp_rate'. TORQUE_RAMP only applies in TORQUE_CONTROL mode."
         )
+        self.currentTextChanged.connect(self._on_changed)
+        self.setEnabled(False)
 
     @property
     def input_mode(self):
-        for value, label in INPUT_MODES.items():
-            if label == self.currentText():
-                return value
-        return None
+        return self.currentData()
 
     def bind(self, controller):
-        """Attach a controller and load its current input_mode."""
+        """Attach a controller, enable the box and populate for its mode."""
         self._controller = controller
-        self._syncing = True
+        if controller is None or not hasattr(controller.config, "input_mode"):
+            self.clear()
+            self.setEnabled(False)
+            return
+        self.setEnabled(True)
+        self._apply_for_mode(self._read_mode())
+
+    def set_control_mode(self, control_mode):
+        """Repopulate for a (possibly new) control mode."""
+        if self._controller is None:
+            return
+        self._apply_for_mode(control_mode)
+
+    def _read_mode(self):
         try:
-            if controller is not None and hasattr(controller.config, "input_mode"):
-                self.setCurrentText(INPUT_MODES.get(controller.config.input_mode, ""))
-            else:
-                self.setCurrentText("")
-                self.setEnabled(False)
-        finally:
-            self._syncing = False
+            return self._controller.config.control_mode
+        except Exception:
+            return None
+
+    def _apply_for_mode(self, control_mode):
+        allowed = self.MODES_BY_CONTROL.get(control_mode, [INPUT_MODE_PASSTHROUGH])
+        try:
+            cur = self._controller.config.input_mode
+        except Exception:
+            cur = None
+        if cur is not None and cur in allowed and cur != INPUT_MODE_PASSTHROUGH:
+            select = cur
+        else:
+            # Passthrough (or an inapplicable mode) is never auto-selected:
+            # fall back to the recommended mode instead.
+            select = self.DEFAULT_BY_CONTROL.get(control_mode, allowed[0])
+        self._populate(select, allowed)
+        # Device had an input mode inapplicable to this control mode: correct it.
+        if cur is not None and select != cur:
+            try:
+                self._controller.config.input_mode = select
+            except Exception as e:
+                logger.warning("failed to set input_mode: %s", e)
+
+    def _populate(self, select_value, allowed):
+        self.blockSignals(True)
+        self.clear()
+        idx = 0
+        for i, value in enumerate(allowed):
+            self.addItem(INPUT_MODES[value], value)
+            if value == select_value:
+                idx = i
+        self.setCurrentIndex(idx)
+        # Size the box to its longest item so text isn't clipped.
+        fm = self.fontMetrics()
+        max_w = max(fm.horizontalAdvance(self.itemText(i))
+                    for i in range(self.count())) + 40
+        self.setMinimumWidth(max_w)
+        self.blockSignals(False)
 
     @Slot()
     def _on_changed(self):
-        if self._syncing or self._controller is None:
+        if self._controller is None:
             return
-        value = self.input_mode
+        value = self.currentData()
         if value is None:
             return
         try:

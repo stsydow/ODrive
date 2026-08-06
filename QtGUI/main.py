@@ -290,6 +290,11 @@ class ODriveGUI(QMainWindow):
         self.mode_combo.addItems(MODE_NAMES.values())
         self.mode_combo.currentTextChanged.connect(self.on_mode_changed)
         mode_layout.addWidget(self.mode_combo)
+        mode_layout.addSpacing(16)
+        # Input mode: restricted to modes valid for the current control mode.
+        mode_layout.addWidget(QLabel("Input Mode:"))
+        self.input_selector = InputModeSelector(self.statusBar().showMessage)
+        mode_layout.addWidget(self.input_selector)
         mode_layout.addStretch()
         vel_layout.addLayout(mode_layout)
 
@@ -343,10 +348,8 @@ class ODriveGUI(QMainWindow):
         self.controls_group.setChecked(True)
         self.controls_group.setToolTip("Untick to collapse")
         cg_layout = QVBoxLayout(self.controls_group)
-        self.input_selector = InputModeSelector(self.statusBar().showMessage)
         self.control_params = ControlParamsGroup(self.statusBar().showMessage)
         self.limits_tabs = LimitsTabs(self.statusBar().showMessage)
-        cg_layout.addWidget(self.input_selector)
         cg_layout.addWidget(self.control_params)
         cg_layout.addWidget(self.limits_tabs)
         self.controls_group.toggled.connect(self._on_controls_collapsed)
@@ -507,7 +510,6 @@ class ODriveGUI(QMainWindow):
     @Slot(bool)
     def _on_controls_collapsed(self, checked):
         """Collapse/expand the Control Settings panel contents."""
-        self.input_selector.setVisible(checked)
         self.control_params.setVisible(checked)
         self.limits_tabs.setVisible(checked)
 
@@ -540,6 +542,8 @@ class ODriveGUI(QMainWindow):
         self.vel_group.setVisible(actual_mode == CONTROL_MODE_VELOCITY_CONTROL)
         self.torque_group.setVisible(actual_mode == CONTROL_MODE_TORQUE_CONTROL)
         self.pos_group.setVisible(actual_mode == CONTROL_MODE_POSITION_CONTROL)
+        # Restrict the input-mode box to modes valid for this control mode.
+        self.input_selector.set_control_mode(actual_mode)
 
     def _current_control_mode(self):
         """Return the current control mode, or None if controller is unavailable."""
@@ -882,6 +886,24 @@ class ODriveGUI(QMainWindow):
             self._last_read_error = msg
         return False
 
+    def _read_value(self, name, fn, setter=None):
+        """Read a device value and apply it.
+
+        Centralises the try/except read pattern (Plan.md §4.1): `fn()` does
+        the device read, `setter(value)` updates the UI. Returns
+        `(value, fatal)` where `fatal` is True only when the read failed with
+        a disconnect (`ObjectLostError`) — the caller ORs it into the
+        reconnect counter. Non-fatal failures return `(None, False)` and are
+        logged once by `_read_failed`.
+        """
+        try:
+            value = fn()
+        except Exception as e:
+            return None, self._read_failed(name, e)
+        if setter is not None:
+            setter(value)
+        return value, False
+
     def update_readings(self):
         """Update displayed values from the ODrive. If reads fail repeatedly
         (and no _on_lost notification arrived), trigger a reconnect."""
@@ -899,37 +921,34 @@ class ODriveGUI(QMainWindow):
 
         any_failed = False
 
-        vbus = None
-        try:
-            vbus = self.odrive.vbus_voltage
-            self.vbus_status_label.setText(f"{vbus:.1f} V")
-        except Exception as e:
-            any_failed |= self._read_failed("vbus_voltage", e)
+        vbus, failed = self._read_value(
+            "vbus_voltage",
+            lambda: self.odrive.vbus_voltage,
+            lambda v: self.vbus_status_label.setText(f"{v:.1f} V"))
+        any_failed |= failed
 
-        ibus = None
-        try:
-            ibus = self.odrive.ibus
-        except Exception as e:
-            any_failed |= self._read_failed("ibus", e)
+        ibus, failed = self._read_value("ibus", lambda: self.odrive.ibus)
+        any_failed |= failed
 
         if vbus is not None and ibus is not None:
             self.power_status_label.setText(f"{vbus * ibus:.1f} W")
         else:
             self.power_status_label.setText("-- W")
 
-        try:
-            self.vel_estimate_label.setText(f"est: {self.encoder.vel_estimate:.3f} rps")
-        except Exception as e:
-            any_failed |= self._read_failed("vel_estimate", e)
+        _, failed = self._read_value(
+            "vel_estimate",
+            lambda: self.encoder.vel_estimate,
+            lambda v: self.vel_estimate_label.setText(f"est: {v:.3f} rps"))
+        any_failed |= failed
 
-        try:
-            pos = self.encoder.pos_estimate
+        pos, failed = self._read_value("pos_estimate",
+                                       lambda: self.encoder.pos_estimate)
+        any_failed |= failed
+        if pos is not None:
             rng = self._position_circular_range()
             if rng is not None:
                 pos = pos % rng  # wrap into [0, range) to match circular mode
             self.pos_estimate_label.setText(f"est: {pos:.4f} rev")
-        except Exception as e:
-            any_failed |= self._read_failed("pos_estimate", e)
 
         # Phase 2: decode errors; keep footer + bounded history (guarded
         # optional reads — do not feed the disconnect counter).
