@@ -27,7 +27,7 @@ QtGUI/main.py
   │     └── ErrorDialog(QDialog)           # current errors + history, clear/export
   │                                       # opened via Device > Errors… or footer click
   ├── ODriveGUI(QMainWindow)          # Main window, owns all UI & state
-  │     ├── setup_ui()                # Layout: Connection, Control, Calibration, Device, Readings
+  │     ├── setup_ui()                # Layout: menus, Control Command, Control Settings
   │     ├── connect_odrive()          # Background thread → odrive.find_any()
   │     ├── _connect_worker()         # Daemon thread, delivers result via QTimer.singleShot
   │     ├── _on_connected()           # Wire up axis, register _on_lost callback
@@ -92,9 +92,9 @@ QtGUI/main.py
 ├──────────────────────────────────────────────────┤
 │  Control Command  (setpoints, enabled only in closed-loop) │
 │  Control Mode: [Velocity Control ▾]               │
-│  Velocity Setpoint (rps): [   0.000   ▲▼ ]        │
+│  Velocity Setpoint (rps): [   0.000   ▲▼ ]  est: 0.045 rps│
 │  Torque Setpoint (A): [   0.000   ▲▼ ]  ← hidden │
-│  Position Setpoint (rev): [   0.0000  ▲▼ ]← hidden│
+│  Position Setpoint (rev): [   0.0000  ▲▼ ] est: 1.23 rev│← hidden │
 ├──────────────────────────────────────────────────┤
 │  ☑ Control Settings  (Phase 1, collapsible)       │
 │  Input Mode: [Velocity Ramp (2) — recommended ▾]  │
@@ -104,13 +104,6 @@ QtGUI/main.py
 │  │ [Electrical Limits | Mechanical Limits]      │ │
 │  │  [Cur lim (A)___]  [Cur lim margin (A)___]  │ │
 │  └──────────────────────────────────────────────┘ │
-├──────────────────────────────────────────────────┤
-│  Readings (monitoring)                            │
-│  VBus Voltage: 24.50 V                            │
-│  Motor Current: 0.12 A                            │
-│  Velocity Estimate: 0.045 rps  ← bold            │
-│  Position Estimate: 1.2345 rev                    │
-│  Error: None                                      │
 ├──────────────────────────────────────────────────┤
 │  [Ready...]  ●Online  State:CLS_LOOP  Err:OK  24.5V  49.0W │  ← status bar
 └──────────────────────────────────────────────────┘

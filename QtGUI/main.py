@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 from PySide6.QtCore import QTimer, Slot, Signal, Qt
-from PySide6.QtGui import QAction, QFont
+from PySide6.QtGui import QAction
 
 # Make the ODrive tools package (tools/odrive) importable when running
 # directly from the QtGUI directory without prior installation.
@@ -39,7 +39,7 @@ import odrive.enums
 from controls import ControlParamsGroup, InputModeSelector, LimitsTabs
 
 # Phase 2: Error display & history (Plan.md §2)
-from monitoring import ErrorDialog, format_current, read_error_report
+from monitoring import ErrorDialog, read_error_report
 
 # Import fibre for ObjectLostError disconnect detection
 import fibre
@@ -293,43 +293,32 @@ class ODriveGUI(QMainWindow):
         mode_layout.addStretch()
         vel_layout.addLayout(mode_layout)
 
-        vel_set_layout = QHBoxLayout()
-        vel_set_layout.addWidget(QLabel("Velocity Setpoint (rps):"))
-        self.vel_spinbox = QDoubleSpinBox()
-        self.vel_spinbox.setRange(-100, 100)
-        self.vel_spinbox.setDecimals(3)
+        # Setpoint rows share one consistent layout via the helpers below:
+        #   [label] [spinbox] [estimate?] [stretch]
+        # Only the row matching the current control mode is visible (see
+        # sync_ui_from_controller); setpoints are written only on explicit
+        # confirmation (Apply button / Enter key — see _apply_setpoint).
+        self.vel_spinbox = self._make_setpoint_spin(-100.0, 100.0, 3)
         self.vel_spinbox.setSingleStep(0.1)
-        self.vel_spinbox.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
-        # Setpoint is NOT written on change; applied only on explicit confirm
-        # (Apply button or Enter key) — see _apply_setpoint().
-        self.vel_spinbox.lineEdit().returnPressed.connect(self._apply_setpoint)
-        vel_set_layout.addWidget(self.vel_spinbox)
-        vel_set_layout.addStretch()
-        vel_layout.addLayout(vel_set_layout)
+        self.vel_estimate_label = QLabel("est: -- rps")
+        self.vel_estimate_label.setStyleSheet("color: gray;")
+        self.vel_group = self._make_setpoint_row(
+            "Velocity Setpoint (rps):", self.vel_spinbox, self.vel_estimate_label)
+        vel_layout.addWidget(self.vel_group)
 
         # Torque setpoint (hidden by default)
-        self.torque_group = QWidget()
-        torque_layout = QHBoxLayout(self.torque_group)
-        torque_layout.addWidget(QLabel("Torque Setpoint (A):"))
-        self.torque_spinbox = QDoubleSpinBox()
-        self.torque_spinbox.setRange(-10, 10)
-        self.torque_spinbox.setDecimals(3)
-        self.torque_spinbox.lineEdit().returnPressed.connect(self._apply_setpoint)
-        torque_layout.addWidget(self.torque_spinbox)
-        torque_layout.addStretch()
+        self.torque_spinbox = self._make_setpoint_spin(-10.0, 10.0, 3)
+        self.torque_group = self._make_setpoint_row(
+            "Torque Setpoint (A):", self.torque_spinbox)
         vel_layout.addWidget(self.torque_group)
         self.torque_group.setVisible(False)
 
         # Position setpoint (hidden by default)
-        self.pos_group = QWidget()
-        pos_layout = QHBoxLayout(self.pos_group)
-        pos_layout.addWidget(QLabel("Position Setpoint (rev):"))
-        self.pos_spinbox = QDoubleSpinBox()
-        self.pos_spinbox.setRange(-1e6, 1e6)
-        self.pos_spinbox.setDecimals(4)
-        self.pos_spinbox.lineEdit().returnPressed.connect(self._apply_setpoint)
-        pos_layout.addWidget(self.pos_spinbox)
-        pos_layout.addStretch()
+        self.pos_spinbox = self._make_setpoint_spin(-1e6, 1e6, 4)
+        self.pos_estimate_label = QLabel("est: -- rev")
+        self.pos_estimate_label.setStyleSheet("color: gray;")
+        self.pos_group = self._make_setpoint_row(
+            "Position Setpoint (rev):", self.pos_spinbox, self.pos_estimate_label)
         vel_layout.addWidget(self.pos_group)
         self.pos_group.setVisible(False)
 
@@ -363,20 +352,9 @@ class ODriveGUI(QMainWindow):
         self.controls_group.toggled.connect(self._on_controls_collapsed)
         main_layout.addWidget(self.controls_group)
 
-        # ── Readings (monitoring) ───────────────────────────────────
-        readings_group = QGroupBox("Readings")
-        readings_layout = QVBoxLayout()
-        self.vbus_label = QLabel("VBus Voltage: -- V")
-        readings_layout.addWidget(self.vbus_label)
-        self.current_label = QLabel("Motor Current: -- A")
-        readings_layout.addWidget(self.current_label)
-        self.vel_estimate_label = QLabel("Velocity Estimate: -- rps")
-        self.vel_estimate_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        readings_layout.addWidget(self.vel_estimate_label)
-        self.pos_estimate_label = QLabel("Position Estimate: -- rev")
-        readings_layout.addWidget(self.pos_estimate_label)
-        readings_group.setLayout(readings_layout)
-        main_layout.addWidget(readings_group)
+        # Note: the separate "Readings" group was removed; live estimates now
+        # live beside their setpoints in the Control Command section and the
+        # footer shows bus voltage / power.
 
     def closeEvent(self, event):
         """Clean up on window close.
@@ -559,6 +537,7 @@ class ODriveGUI(QMainWindow):
                 self.mode_combo.setCurrentIndex(idx)
                 self.mode_combo.blockSignals(False)
 
+        self.vel_group.setVisible(actual_mode == CONTROL_MODE_VELOCITY_CONTROL)
         self.torque_group.setVisible(actual_mode == CONTROL_MODE_TORQUE_CONTROL)
         self.pos_group.setVisible(actual_mode == CONTROL_MODE_POSITION_CONTROL)
 
@@ -610,6 +589,9 @@ class ODriveGUI(QMainWindow):
                 self.controller.input_pos = self.pos_spinbox.value()
             elif new_mode == CONTROL_MODE_TORQUE_CONTROL:
                 self.controller.input_torque = self.torque_spinbox.value()
+            # Update the visible setpoint row immediately (not only at the
+            # next 100ms poll).
+            self.sync_ui_from_controller()
             self.statusBar().showMessage(f"Control mode set to {mode}", 3000)
         except Exception as e:
             logger.warning("Failed to set control mode %s: %s", mode, e)
@@ -643,6 +625,29 @@ class ODriveGUI(QMainWindow):
                     self.pos_spinbox.blockSignals(False)
         except Exception as e:
             logger.debug("sync setpoint from device failed: %s", e)
+
+    def _make_setpoint_spin(self, minimum, maximum, decimals):
+        """Build a setpoint spinbox. No valueChanged write: the value reaches
+        the device only via explicit confirmation (Apply / Enter)."""
+        sb = QDoubleSpinBox()
+        sb.setRange(minimum, maximum)
+        sb.setDecimals(decimals)
+        sb.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
+        sb.lineEdit().returnPressed.connect(self._apply_setpoint)
+        return sb
+
+    def _make_setpoint_row(self, text, spin, est_label=None):
+        """Build one Control Command row: [label] [spinbox] [estimate?] [stretch].
+        Shared by velocity / torque / position so all rows are identical."""
+        row = QWidget()
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(QLabel(text))
+        lay.addWidget(spin)
+        if est_label is not None:
+            lay.addWidget(est_label)
+        lay.addStretch()
+        return row
 
     @Slot()
     def _apply_setpoint(self):
@@ -882,7 +887,6 @@ class ODriveGUI(QMainWindow):
         vbus = None
         try:
             vbus = self.odrive.vbus_voltage
-            self.vbus_label.setText(f"VBus Voltage: {vbus:.2f} V")
             self.vbus_status_label.setText(f"{vbus:.1f} V")
         except Exception as e:
             any_failed |= self._read_failed("vbus_voltage", e)
@@ -890,7 +894,6 @@ class ODriveGUI(QMainWindow):
         ibus = None
         try:
             ibus = self.odrive.ibus
-            self.current_label.setText(f"Motor Current: {ibus:.2f} A")
         except Exception as e:
             any_failed |= self._read_failed("ibus", e)
 
@@ -900,12 +903,12 @@ class ODriveGUI(QMainWindow):
             self.power_status_label.setText("-- W")
 
         try:
-            self.vel_estimate_label.setText(f"Velocity Estimate: {self.encoder.vel_estimate:.3f} rps")
+            self.vel_estimate_label.setText(f"est: {self.encoder.vel_estimate:.3f} rps")
         except Exception as e:
             any_failed |= self._read_failed("vel_estimate", e)
 
         try:
-            self.pos_estimate_label.setText(f"Position Estimate: {self.encoder.pos_estimate:.4f} rev")
+            self.pos_estimate_label.setText(f"est: {self.encoder.pos_estimate:.4f} rev")
         except Exception as e:
             any_failed |= self._read_failed("pos_estimate", e)
 
