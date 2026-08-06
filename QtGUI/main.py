@@ -95,6 +95,28 @@ AXIS_STATE_NAMES = {
 }
 
 
+def _state_display(value):
+    """Friendly footer label for an axis state: Idle / Control Loop /
+    Calibration: <program>, with a fallback to the raw short name."""
+    if value in (odrive.enums.AXIS_STATE_IDLE, odrive.enums.AXIS_STATE_UNDEFINED):
+        return "Idle"
+    if value == odrive.enums.AXIS_STATE_CLOSED_LOOP_CONTROL:
+        return "Control Loop"
+    if value == odrive.enums.AXIS_STATE_STARTUP_SEQUENCE:
+        return "Startup"
+    if value == odrive.enums.AXIS_STATE_HOMING:
+        return "Homing"
+    short = AXIS_STATE_NAMES.get(value)
+    if short and any(k in short for k in
+                     ("CALIBRATION", "DIR_FIND", "INDEX_SEARCH", "LOCKIN")):
+        # Prefer the dropdown's friendly program label for consistency.
+        for label, enum_val in STATE_MAP.items():
+            if enum_val == value:
+                return "Calibration: " + label
+        return "Calibration: " + short.replace("_", " ").title()
+    return short or str(value)
+
+
 def maybe_read(fn, default=None):
     """Return `fn()` if it succeeds, else `default` (None).
 
@@ -264,7 +286,7 @@ class ODriveGUI(QMainWindow):
         status_layout.setSpacing(14)
         self.conn_label = QLabel("● Offline")
         self.conn_label.setStyleSheet("color: gray; font-weight: bold; padding: 2px 6px;")
-        self.state_status_label = QLabel("State: --")
+        self.state_status_label = QLabel("--")
         self.error_status_label = _ClickableLabel("Err: OK")
         self.error_status_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self.error_status_label.setToolTip("Click to open the decoded errors / history")
@@ -916,8 +938,7 @@ class ODriveGUI(QMainWindow):
         self._update_control_enabled()
         st = maybe_read(lambda: self.axis.current_state)
         if st is not None:
-            self.state_status_label.setText(
-                "State: " + AXIS_STATE_NAMES.get(st, str(st)))
+            self.state_status_label.setText(_state_display(st))
 
         any_failed = False
 

@@ -505,3 +505,4 @@ corresponds to `pole_pairs = 8` in the working device config.
 | 2025-08 | Input-mode selector refinements: Passthrough is listed LAST (never the default) when a shaping mode exists; default is the recommended mode per control mode (VEL_RAMP / TORQUE_RAMP / TRAP_TRAJ), auto-correcting an inapplicable/Passthrough device mode; dropped the "— recommended" label suffix; combo auto-sizes to its longest item. |
 | 2025-08 | Axis-state dropdown uses friendly labels ("Lock-In Spin", "Motor Calibration", …) instead of raw enum names; mapping unchanged. |
 | 2025-08 | Renamed the axis-state dropdown label "State:" -> "Programm:" and the button "Execute State" -> "Start". |
+| 2025-08 | Footer state field shows friendly names: "Idle", "Control Loop", "Calibration: <Programm>" (preferring the dropdown program labels), with the redundant "State:" prefix dropped for a uniform footer. |
