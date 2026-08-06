@@ -11,6 +11,7 @@ These project-wide rules must hold for every feature; implementation specifics a
 - The UI may write a setpoint or select a mode, but **does not drive or supervise** the control loop. Once a speed is set, **the motor keeps running independently** of the GUI.
 - **Closing the GUI, reconnecting, or losing connection never stops the motor.** The GUI commands the device only through explicit user actions: **Run (Closed Loop)**, **Stop (Idle)**, and **Execute State**.
 - Connect/disconnect transitions only tear down GUI references — there are **no implicit writes** to `requested_state`.
+- **Setpoints are applied only on explicit confirmation** (Apply button or Enter key). Adjusting a setpoint field never commands the motor; only a confirmed apply sends it to the device.
 
 ## Architecture
 
@@ -86,7 +87,7 @@ QtGUI/main.py
 ├──────────────────────────────────────────────────┤
 │  [▶ Run (Closed Loop)]  [■ Stop (Idle)]  State: [AXIS_STATE_IDLE ▾]  [Execute State] │
 ├──────────────────────────────────────────────────┤
-│  Velocity Control                                 │
+│  Control Command  (setpoints, enabled only in closed-loop) │
 │  Control Mode: [Velocity Control ▾]               │
 │  Velocity Setpoint (rps): [   0.000   ▲▼ ]        │
 │  Torque Setpoint (A): [   0.000   ▲▼ ]  ← hidden │
@@ -108,7 +109,7 @@ QtGUI/main.py
 │  Position Estimate: 1.2345 rev                    │
 │  Error: None                                      │
 ├──────────────────────────────────────────────────┤
-│  [Ready...]                           ● Connected │  ← status bar
+│  [Ready...]  ●Online  State:CLS_LOOP  Err:OK  24.5V  49.0W │  ← status bar
 └──────────────────────────────────────────────────┘
 ```
 
@@ -126,13 +127,14 @@ QtGUI/main.py
 | **`hasattr` for remote methods** | Before calling `odrv.reboot()`, the code checks with `hasattr` so that firmware variants without the reboot endpoint get a clear error message instead of an `AttributeError`. |
 | **Feature-gated control settings (Phase 1)** | `GainsPanel`/`InputModeSelector` read the device on `bind()` and disable any row the firmware doesn't expose (`hasattr` on `obj.config`), per Plan.md §4.2. Writes are wrapped and surfaced via a status callback; a `_syncing` guard suppresses write-backs during programmatic sync. |
 | **Device section → menu bar** | Save/Export/Import/Reboot moved from a group box to a **Device** menu on the menu bar. This declutters the main area and follows standard desktop GUI conventions. The menu is disabled until connected, just like the control widgets. |
-| **Connection status in the status bar footer** | The connection status label is a permanent widget on the `QStatusBar` instead of a dedicated group box. This keeps the main area focused on control and monitoring, while the footer always shows the connection state. Temporary action messages (save, export, etc.) appear via `showMessage()` on the left. |
+| **Connection status in the status bar footer** | The connection status is a permanent composed widget on the `QStatusBar` (connection indicator, error, bus voltage, power draw — Plan.md §4.7) instead of a dedicated group box. This keeps the main area focused on control and monitoring, while the footer always shows live state. Temporary action messages (save, export, etc.) appear via `showMessage()` on the left without duplicating the connection text. |
 | **Persistent status bar messages** | `showMessage(text, 0)` is used for connection progress ("Finding ODrive...", "Connected!") so they don't disappear after the default 3 s timeout. Action messages (save, export) still use the default transient timeout. |
 | **Debug menu** | A Debug menu provides verbose logging toggle, force reconnect, and device info — useful for diagnosing connection issues without restarting the GUI. |
 | **No connect/disconnect button** | Auto-connect on startup + auto-reconnect on loss makes a manual button redundant. The status bar shows the current state. |
 | **UI never stops the motor (monitor-only)** | Per the general project rule, closing the window or reconnecting must not command the device. `closeEvent()` only stops the poll timer; reconnect only tears down GUI references. The motor is commanded **exclusively** via the explicit Run / Stop / Execute-State actions. |
 | **Ctrl+C via `SIG_DFL`** | The Qt event loop is a blocking C++ call, so a Python `KeyboardInterrupt` is not serviced during `app.exec()` (a timer "nudge" is unreliable). Restoring the default SIGINT action (`signal.signal(SIGINT, SIG_DFL)`) makes Ctrl+C terminate the process at the OS level, reliably from any state (including while "finding device"). Safe because the GUI is monitor-only. |
-
+| **Confirmed setpoint apply** | The velocity/torque/position spinboxes do **not** write on change. The active setpoint is written to the device only on explicit confirmation — an "Apply Setpoint" button or the Enter key (`lineEdit().returnPressed`). Adjusting a field never moves the motor. |
+| **Control Command gating + state in footer** | The renamed "Control Command" section keeps its mode combo usable when connected, but the setpoint/Apply inputs are enabled only while the axis is in `CLOSED_LOOP_CONTROL` (checked each 100 ms poll). The current axis state is always shown in the status footer (`AXIS_STATE_NAMES` reverse map), not only while running. |
 ## Threading Model
 
 ```
@@ -164,6 +166,45 @@ odrv._on_lost.add_done_callback()
 2. **New ODrive method call**: Call it on `self.odrive` (or `self.axis`/`self.controller`/`self.motor`/`self.encoder`). Wrap in `try/except` — the serial connection may drop.
 3. **New reconnect trigger**: The `_on_device_lost` callback handles most cases. If your feature causes the device to disconnect (e.g., reboot), `_on_lost` will fire and auto-reconnect will re-establish the connection.
 4. **New reading**: Add a label + update code in `update_readings()`.
+
+## Git Commit Conventions
+
+Commit titles follow **Conventional Commits** (`type(scope): summary`), and the message body uses a **title, then a blank line, then a short description**.
+
+Format:
+```
+<type>(<scope>): <imperative summary>
+
+<short description of what and why (wrapped ~72 cols)>
+```
+
+- **Title** (`type(scope): summary`): lowercase, imperative mood, ≈72 chars max. Keep the summary concise.
+- **Blank line** after the title — it separates the subject from the body.
+- **Body**: a short description covering *what* changed and *why* (not a line-by-line log).
+
+Common `type`s:
+| Type | Use |
+|------|-----|
+| `feat` | New feature / capability |
+| `fix` | Bug fix |
+| `refactor` | Code change that neither fixes a bug nor adds a feature |
+| `docs` | Documentation only (Plan/ARCHITECTURE comments) |
+| `test` | Adding/updating tests |
+| `chore` | Tooling / maintenance (no product code) |
+| `ui` | User-interface / widget / status-bar work |
+
+Examples:
+```
+ui: composed status footer + closed-loop-gated commands
+
+Rename the velocity section to "Control Command", gate its setpoints on
+closed-loop control, and replace the status label with a composed footer.
+```
+```
+fix: read device setpoint into display on closed-loop entry
+```
+
+Keep each commit focused on one concern; don't mix unrelated changes in a single commit.
 
 ## Dependencies
 

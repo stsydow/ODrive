@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..
 
 import odrive
 import odrive.configuration
+import odrive.enums
 from odrive.utils import dump_errors
 
 # Phase 1: Control Settings (Plan.md §1)
@@ -83,6 +84,33 @@ STATE_MAP = {
     "AXIS_STATE_LOCKIN_SPIN": AXIS_STATE_LOCKIN_SPIN,
 }
 
+# Reverse map: axis-state value -> short display name (status bar).
+AXIS_STATE_NAMES = {
+    v: n.replace("AXIS_STATE_", "")
+    for n, v in vars(odrive.enums).items()
+    if n.startswith("AXIS_STATE_")
+}
+
+
+def maybe_read(fn, default=None):
+    """Return `fn()` if it succeeds, else `default` (None).
+
+    Centralises "get a value if available" so truly-optional device reads
+    (monitor values, live state) are handled consistently and logged once,
+    instead of scattered ``try/except: pass`` blocks that tend to rot into
+    hard-to-find bugs. The caller must handle `None`.
+
+    Only use for genuinely optional reads. Reads that must distinguish error
+    classes (e.g. ObjectLostError -> reconnect) keep explicit, targeted
+    try/except (see `_read_failed`). Never use a bare ``except: pass``.
+    """
+    try:
+        return fn()
+    except Exception as e:  # noqa: BLE001 - optional read, default on any failure
+        logger.debug("read failed (defaulting to %r): %s", default, e)
+        return default
+
+
 
 class ODriveGUI(QMainWindow):
     """Main ODrive GUI window - Axis 0 velocity control focused."""
@@ -96,6 +124,7 @@ class ODriveGUI(QMainWindow):
         self.controller = None
 
         self._connecting = False
+        self._connected = False
         self._read_fail_count = 0
         self._last_synced_mode = None
         self._last_read_error = None
@@ -216,15 +245,30 @@ class ODriveGUI(QMainWindow):
 
         main_layout.addLayout(control_layout)
 
-        # Connection status shown in the status bar (footer)
-        self.status_label = QLabel("Not connected")
-        self.status_label.setStyleSheet("color: gray; font-weight: bold; padding: 2px 8px;")
-        self.statusBar().addPermanentWidget(self.status_label)
+        # Status footer: connection / error / bus voltage / power draw.
+        # A composed permanent widget (no duplicate connection text overlap).
+        status_widget = QWidget()
+        status_layout = QHBoxLayout(status_widget)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(14)
+        self.conn_label = QLabel("● Offline")
+        self.conn_label.setStyleSheet("color: gray; font-weight: bold; padding: 2px 6px;")
+        self.state_status_label = QLabel("State: --")
+        self.error_status_label = QLabel("Err: OK")
+        self.error_status_label.setStyleSheet("color: gray;")
+        self.vbus_status_label = QLabel("-- V")
+        self.power_status_label = QLabel("-- W")
+        status_layout.addWidget(self.conn_label)
+        status_layout.addWidget(self.state_status_label)
+        status_layout.addWidget(self.error_status_label)
+        status_layout.addWidget(self.vbus_status_label)
+        status_layout.addWidget(self.power_status_label)
+        self.statusBar().addPermanentWidget(status_widget)
         self.statusBar().showMessage("Ready", 0)
 
-        # ── Velocity Control ────────────────────────────────────────
-        self.vel_group = QGroupBox("Velocity Control")
-        vel_layout = QVBoxLayout(self.vel_group)
+        # ── Control Command (setpoints, disabled unless closed-loop) ──
+        self.cmd_group = QGroupBox("Control Command")
+        vel_layout = QVBoxLayout(self.cmd_group)
 
         mode_layout = QHBoxLayout()
         mode_layout.addWidget(QLabel("Control Mode:"))
@@ -242,7 +286,9 @@ class ODriveGUI(QMainWindow):
         self.vel_spinbox.setDecimals(3)
         self.vel_spinbox.setSingleStep(0.1)
         self.vel_spinbox.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
-        self.vel_spinbox.valueChanged.connect(self.on_velocity_changed)
+        # Setpoint is NOT written on change; applied only on explicit confirm
+        # (Apply button or Enter key) — see _apply_setpoint().
+        self.vel_spinbox.lineEdit().returnPressed.connect(self._apply_setpoint)
         vel_set_layout.addWidget(self.vel_spinbox)
         vel_set_layout.addStretch()
         vel_layout.addLayout(vel_set_layout)
@@ -254,7 +300,7 @@ class ODriveGUI(QMainWindow):
         self.torque_spinbox = QDoubleSpinBox()
         self.torque_spinbox.setRange(-10, 10)
         self.torque_spinbox.setDecimals(3)
-        self.torque_spinbox.valueChanged.connect(self.on_torque_changed)
+        self.torque_spinbox.lineEdit().returnPressed.connect(self._apply_setpoint)
         torque_layout.addWidget(self.torque_spinbox)
         torque_layout.addStretch()
         vel_layout.addWidget(self.torque_group)
@@ -267,13 +313,26 @@ class ODriveGUI(QMainWindow):
         self.pos_spinbox = QDoubleSpinBox()
         self.pos_spinbox.setRange(-1e6, 1e6)
         self.pos_spinbox.setDecimals(4)
-        self.pos_spinbox.valueChanged.connect(self.on_position_changed)
+        self.pos_spinbox.lineEdit().returnPressed.connect(self._apply_setpoint)
         pos_layout.addWidget(self.pos_spinbox)
         pos_layout.addStretch()
         vel_layout.addWidget(self.pos_group)
         self.pos_group.setVisible(False)
 
-        main_layout.addWidget(self.vel_group)
+        # Confirmed setpoint apply (monitor-only: adjusting a spinbox never
+        # moves the motor; the user confirms via Apply or Enter).
+        apply_layout = QHBoxLayout()
+        self.apply_button = QPushButton("Apply Setpoint")
+        self.apply_button.setToolTip(
+            "Send the current setpoint to the device.\n"
+            "Press Enter in the setpoint box as a shortcut."
+        )
+        self.apply_button.clicked.connect(self._apply_setpoint)
+        apply_layout.addWidget(self.apply_button)
+        apply_layout.addStretch()
+        vel_layout.addLayout(apply_layout)
+
+        main_layout.addWidget(self.cmd_group)
 
         # ── Control Settings (Phase 1, collapsible) ─────────────────
         self.controls_group = QGroupBox("Control Settings")
@@ -341,9 +400,7 @@ class ODriveGUI(QMainWindow):
         self._connecting = True
         self._read_fail_count = 0
         self._last_synced_mode = None
-        self.status_label.setText("Connecting...")
-        self.status_label.setStyleSheet("color: orange; font-weight: bold;")
-        self.statusBar().showMessage("Finding ODrive...", 0)
+        self._set_conn("● Connecting…", "orange")
 
         logger.debug("connect_odrive: spawning _connect_worker thread")
         threading.Thread(target=self._connect_worker, daemon=True).start()
@@ -401,10 +458,10 @@ class ODriveGUI(QMainWindow):
         self.input_selector.bind(self.controller)
         self.control_params.bind(self.controller, self.motor, self.odrive)
         self.limits_tabs.bind(self.controller, self.motor, self.odrive)
+        # Show the device's actual setpoint on connect.
+        self._sync_setpoint_from_device()
 
-        self.status_label.setText("Connected")
-        self.status_label.setStyleSheet("color: green; font-weight: bold;")
-        self.statusBar().showMessage("Connected!", 0)
+        self._set_conn("● Online", "green")
         self._set_controls_enabled(True)
         logger.info("Connected to ODrive")
 
@@ -419,19 +476,44 @@ class ODriveGUI(QMainWindow):
         """Handle connection failure in the main thread."""
         self._connecting = False
         logger.warning("on_connect_failed: %s (retry in %d ms)", msg, RECONNECT_RETRY_DELAY_MS)
-        self.status_label.setText("Reconnecting...")
-        self.status_label.setStyleSheet("color: orange; font-weight: bold;")
-        self.statusBar().showMessage("Finding ODrive...", 0)
+        self._set_conn("● Offline (retrying)", "red")
         QTimer.singleShot(RECONNECT_RETRY_DELAY_MS, self.connect_odrive)
+
+    def _set_conn(self, text, color):
+        """Set the permanent connection-indicator label in the status footer."""
+        self.conn_label.setText(text)
+        self.conn_label.setStyleSheet(
+            f"color: {color}; font-weight: bold; padding: 2px 6px;")
 
     def _set_controls_enabled(self, enabled):
         """Enable or disable all control widgets that require a connection."""
-        self.vel_group.setEnabled(enabled)
+        self._connected = enabled
         self.run_button.setEnabled(enabled)
         self.stop_button.setEnabled(enabled)
         self.state_combo.setEnabled(enabled)
         self.calib_button.setEnabled(enabled)
         self.controls_group.setEnabled(enabled)
+        self._update_control_enabled()
+
+    def _update_control_enabled(self):
+        """Gate the Control Command setpoint inputs on closed-loop control.
+
+        The command inputs (setpoint spinboxes + Apply) are only usable while
+        the axis is actually running closed-loop. The control-mode combo stays
+        available whenever connected so the user can select the mode before
+        running (a disabled parent would otherwise force-disable the combo).
+        """
+        running = False
+        if self._connected and self.axis is not None:
+            running = maybe_read(
+                lambda: self.axis.current_state == AXIS_STATE_CLOSED_LOOP_CONTROL,
+                default=False)
+        cmd_ok = self._connected and running
+        self.cmd_group.setEnabled(self._connected)
+        self.vel_spinbox.setEnabled(cmd_ok)
+        self.torque_spinbox.setEnabled(cmd_ok)
+        self.pos_spinbox.setEnabled(cmd_ok)
+        self.apply_button.setEnabled(cmd_ok)
 
     @Slot(bool)
     def _on_controls_collapsed(self, checked):
@@ -484,6 +566,8 @@ class ODriveGUI(QMainWindow):
         if self.axis is None:
             return
         self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+        # Show the device's actual setpoint, not a stale/reset local value.
+        self._sync_setpoint_from_device()
         self.statusBar().showMessage("Running - Closed Loop Control")
 
     @Slot()
@@ -492,7 +576,6 @@ class ODriveGUI(QMainWindow):
         if self.axis is None:
             return
         self.axis.requested_state = AXIS_STATE_IDLE
-        self.vel_spinbox.setValue(0)
         self.statusBar().showMessage("Stopped - Idle")
 
     @Slot(str)
@@ -521,32 +604,61 @@ class ODriveGUI(QMainWindow):
             logger.warning("Failed to set control mode %s: %s", mode, e)
             self.statusBar().showMessage(f"Failed to set control mode: {e}", 3000)
 
-    @Slot(float)
-    def on_velocity_changed(self, value):
-        """Update velocity setpoint (only when in velocity mode)."""
-        if self._current_control_mode() == CONTROL_MODE_VELOCITY_CONTROL:
-            try:
-                self.controller.input_vel = value
-            except Exception as e:
-                logger.debug("Failed to set input_vel: %s", e)
+    def _sync_setpoint_from_device(self):
+        """Populate the active setpoint spinbox from the device's current
+        input setpoint (device truth). Called on connect and when entering
+        closed-loop so the display isn't a stale/reset local value."""
+        if self.controller is None:
+            return
+        mode = self._current_control_mode()
+        try:
+            if mode == CONTROL_MODE_VELOCITY_CONTROL:
+                v = self.controller.input_vel
+                if v is not None:
+                    self.vel_spinbox.blockSignals(True)
+                    self.vel_spinbox.setValue(float(v))
+                    self.vel_spinbox.blockSignals(False)
+            elif mode == CONTROL_MODE_TORQUE_CONTROL:
+                t = self.controller.input_torque
+                if t is not None:
+                    self.torque_spinbox.blockSignals(True)
+                    self.torque_spinbox.setValue(float(t))
+                    self.torque_spinbox.blockSignals(False)
+            elif mode == CONTROL_MODE_POSITION_CONTROL:
+                p = self.controller.input_pos
+                if p is not None:
+                    self.pos_spinbox.blockSignals(True)
+                    self.pos_spinbox.setValue(float(p))
+                    self.pos_spinbox.blockSignals(False)
+        except Exception as e:
+            logger.debug("sync setpoint from device failed: %s", e)
 
-    @Slot(float)
-    def on_torque_changed(self, value):
-        """Update torque setpoint (only when in torque mode)."""
-        if self._current_control_mode() == CONTROL_MODE_TORQUE_CONTROL:
-            try:
-                self.controller.input_torque = value
-            except Exception as e:
-                logger.debug("Failed to set input_torque: %s", e)
+    @Slot()
+    def _apply_setpoint(self):
+        """Write the currently-active setpoint to the device.
 
-    @Slot(float)
-    def on_position_changed(self, value):
-        """Update position setpoint (only when in position mode)."""
-        if self._current_control_mode() == CONTROL_MODE_POSITION_CONTROL:
-            try:
-                self.controller.input_pos = value
-            except Exception as e:
-                logger.debug("Failed to set input_pos: %s", e)
+        The setpoint spinboxes do not write on change, so adjusting them never
+        moves the motor (monitor-only principle). The value is sent only when
+        the user confirms via the Apply button or by pressing Enter.
+        """
+        if self.controller is None:
+            return
+        mode = self._current_control_mode()
+        try:
+            if mode == CONTROL_MODE_VELOCITY_CONTROL:
+                self.controller.input_vel = self.vel_spinbox.value()
+                label = "Velocity"
+            elif mode == CONTROL_MODE_TORQUE_CONTROL:
+                self.controller.input_torque = self.torque_spinbox.value()
+                label = "Torque"
+            elif mode == CONTROL_MODE_POSITION_CONTROL:
+                self.controller.input_pos = self.pos_spinbox.value()
+                label = "Position"
+            else:
+                return
+            self.statusBar().showMessage(f"{label} setpoint applied", 2000)
+        except Exception as e:
+            self.statusBar().showMessage(f"Failed to apply setpoint: {e}", 3000)
 
     @Slot(str)
     def on_state_changed(self, state_str):
@@ -635,8 +747,7 @@ class ODriveGUI(QMainWindow):
             )
             return
         try:
-            self.status_label.setText("Rebooting...")
-            self.status_label.setStyleSheet("color: orange; font-weight: bold;")
+            self._set_conn("● Rebooting…", "orange")
             self._set_controls_enabled(False)
             self.odrive.reboot()
             self.statusBar().showMessage("Device rebooting")
@@ -757,17 +868,34 @@ class ODriveGUI(QMainWindow):
 
         self.sync_ui_from_controller()
 
+        # Keep the Control Command gating + footer state in sync each poll.
+        self._update_control_enabled()
+        st = maybe_read(lambda: self.axis.current_state)
+        if st is not None:
+            self.state_status_label.setText(
+                "State: " + AXIS_STATE_NAMES.get(st, str(st)))
+
         any_failed = False
 
+        vbus = None
         try:
-            self.vbus_label.setText(f"VBus Voltage: {self.odrive.vbus_voltage:.2f} V")
+            vbus = self.odrive.vbus_voltage
+            self.vbus_label.setText(f"VBus Voltage: {vbus:.2f} V")
+            self.vbus_status_label.setText(f"{vbus:.1f} V")
         except Exception as e:
             any_failed |= self._read_failed("vbus_voltage", e)
 
+        ibus = None
         try:
-            self.current_label.setText(f"Motor Current: {self.odrive.ibus:.2f} A")
+            ibus = self.odrive.ibus
+            self.current_label.setText(f"Motor Current: {ibus:.2f} A")
         except Exception as e:
             any_failed |= self._read_failed("ibus", e)
+
+        if vbus is not None and ibus is not None:
+            self.power_status_label.setText(f"{vbus * ibus:.1f} W")
+        else:
+            self.power_status_label.setText("-- W")
 
         try:
             self.vel_estimate_label.setText(f"Velocity Estimate: {self.encoder.vel_estimate:.3f} rps")
@@ -783,9 +911,13 @@ class ODriveGUI(QMainWindow):
             if self.axis.error:
                 self.error_label.setText(f"Error: {self.axis.error}")
                 self.error_label.setStyleSheet("color: red; font-weight: bold;")
+                self.error_status_label.setText(f"Err: {self.axis.error}")
+                self.error_status_label.setStyleSheet("color: red; font-weight: bold;")
             else:
                 self.error_label.setText("Error: None")
                 self.error_label.setStyleSheet("color: green; font-weight: bold;")
+                self.error_status_label.setText("Err: OK")
+                self.error_status_label.setStyleSheet("color: green; font-weight: bold;")
         except Exception as e:
             any_failed |= self._read_failed("axis.error", e)
         # Fallback disconnect detection (primary is _on_lost)

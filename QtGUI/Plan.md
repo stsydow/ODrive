@@ -17,6 +17,8 @@ Project-wide rules. Implementation specifics (close behaviour, Ctrl+C, threading
 - The UI may write a setpoint or select a mode, but **does not drive or supervise** the control loop. Once a speed is set, **the motor keeps running independently** of the GUI.
 - **Closing the GUI, reconnecting, or losing connection never stops the motor.** The GUI commands the device only through explicit user actions: **Run (Closed Loop)**, **Stop (Idle)**, and **Execute State**.
 - Connect/disconnect transitions only tear down GUI references — there are **no implicit writes** to `requested_state`.
+- **Setpoints are applied only on explicit confirmation** (Apply button or Enter key). Adjusting a setpoint field never commands the motor; only a confirmed apply sends it to the device.
+- **Saving configuration requires confirmation and idles the device first.** Any NVM write (`save_configuration`) is an explicit, user-confirmed action that first transitions the axis to **IDLE** before writing — a config/calibration save can never happen while the motor is running.
 
 ---
 
@@ -240,6 +242,17 @@ A multi-page `QDialog` via `QStackedWidget`:
 
 **Calibration current:** Pre-fills `calibration_current = 4.0`. If the motor jumps electrical revs, suggests increasing this value.
 
+**Finalize & save (`pre_calibrated`):** After the calibration steps pass, run a **functional test** (spin under control, confirm sensible readings). Only then set `encoder.config.pre_calibrated = true` (and `motor.config.pre_calibrated` when applicable) and **save** to NVM. Saving follows the project rule (see Design Principles): the device is put into **IDLE first** and the save requires **user confirmation** — so a calibration/config write can never occur while the motor is running.
+
+**Calibration current settings (distinct, from the interface):** several currents exist along the calibration paths and are exposed read/write in a dedicated **Calibration** tab of the Control Settings surface (beside Electrical Limits / Mechanical Limits / Control Parameters), so the operator can align them before calibrating:
+- `motor.config.calibration_current` — current for measuring phase R/L during `AXIS_STATE_MOTOR_CALIBRATION` (default 10 A; `sew_config` = 4.0 A).
+- `axis.config.calibration_lockin.current` — current for the open-loop lockin spins used by encoder offset / index / hall-polarity / hall-phase calibration (`encoder.cpp` uses `calibration_lockin`; default 10 A; `sew_config` = 5.7 A).
+- `axis.config.general_lockin.current` — current for `AXIS_STATE_LOCKIN_SPIN` (manual lockin spin; default 10 A; `sew_config` = 3.99 A).
+- `axis.config.sensorless_ramp.current` — sensorless-only, **not** used for this hall/BLDC machine (skip).
+- `motor.config.resistance_calib_max_voltage` — related calibration *voltage* (max V for R measurement; `sew_config` = 8.0 V), exposed alongside the currents.
+
+**Plumbing (future):** these live on `axis.config` (`calibration_lockin.{…}`), so the panel `bind()` gains an `axis` ref and the attribute-read/write helper gains dotted-path support (e.g. `calibration_lockin.current`). Generic and feature-gated (`hasattr`) like the rest of §1.
+
 #### 4.3 Step Response Test (Tuning Aid)
 
 A step change in setpoint while recording the system response. Not a dashboard feature — it's a **tuning tool** to measure overshoot, settling time, and steady-state error.
@@ -307,6 +320,10 @@ except Exception as e:
 - **Write failures:** Shown immediately in status bar. Not fatal — device may be in a transient state.
 - **Calibration errors:** Decoded via `dump_errors()` logic, shown in the wizard step with a hint. User can retry or skip.
 
+**Accessing optional / "maybe-none" values (general rule):** do **not** scatter `try: read … except: pass`. For a genuinely optional read, use the shared `maybe_read(fn, default=None)` helper, which centrally catches, logs once, and returns `default`; the caller then checks for `None`. Two kinds of reads must stay as **explicit, targeted** `try/except` (never bare `except: pass`):
+- reads that must distinguish error classes (e.g. `ObjectLostError` → reconnect — see `_read_failed`), and
+- writes (they are surfaced, not swallowed).
+
 ### 4.2 Feature Availability (Feature Detection)
 
 The plan targets **ODrive v0.5.6 series** firmware. The GUI checks for **required features** on connect (not version strings):
@@ -345,6 +362,17 @@ The GUI and all features must work with a different motor and PSU than this sewi
 ### 4.6 UI is a monitor / settings interface, not a controller
 
 General project rule — see **Design Principles** at the top of this document. Implementation details of close/Ctrl+C behaviour are in `ARCHITECTURE.md`.
+
+### 4.7 Status footer
+
+A composed status footer (permanent right-hand widget in the status bar) shows, in separate labeled fields — no duplicate/overlapping connection text:
+- **Connection indicator**: `● Online` (green) / `● Offline` (red) / `● Connecting…` / `● Rebooting…` (orange).
+- **Axis state**: always shown (`State: <AXIS_STATE_NAMES>`, e.g. `IDLE`, `CLOSED_LOOP_CONTROL`, `MOTOR_CALIBRATION`), not only while running.
+- **Error state**: `Err: OK` (green) or `Err: <id>` (red), refreshed with the 100 ms poll. Decoding/hints come with Phase 2 (Error Display).
+- **Bus voltage** (V), from `vbus_voltage`.
+- **Power draw** (W) = `vbus_voltage × ibus`.
+
+Transient action messages (save/export/apply/verbose) still use `showMessage()` on the left and never duplicate the connection state.
 
 ---
 
@@ -460,3 +488,9 @@ corresponds to `pole_pairs = 8` in the working device config.
 | 2025-08 | Final baseline decisions: `vel_limit` kept at **70** (was 66.7) — any value >50 is practically no-limit since torque/current caps out first; `input_mode = VEL_RAMP (2)` everywhere. `vel_integrator_limit` set to **0.188 N·m** (42BLF03 rated continuous torque, ~25 % of peak) instead of 10.0, so the integrator can't demand more torque than the motor can continuously produce (community heuristic is ~50 % of peak torque — a tighter cap chosen deliberately). |
 | 2025-08 | Web review: added hall low-speed performance context (§4.1) with community references; documented why `TORQUE_RAMP` + `torque_ramp_rate` does not work in `VELOCITY` mode — see §4.4 future-torque-filter note. Corrected the control_mode enum: `CONTROL_MODE_VELOCITY_CONTROL = 2` (not 1), `TORQUE=1`. Added §4.5 Portability — Annex A is reference context only, never assumed as the live device state; features are motor/PSU-agnostic. |
 | 2025-08 | Added a top-level **Design Principles** section (UI is a monitor/settings interface, not a controller — never required for realtime control; closing/reconnecting/Ctrl+C never stops the motor; explicit Run/Stop/Execute-State only; no implicit `requested_state` writes; safety is the firmware/controller's job). §4.6 now cross-references it; the close/Ctrl+C *implementation* details moved to `ARCHITECTURE.md`. Ctrl+C switched to OS-level `SIG_DFL` (a Python `KeyboardInterrupt` isn't serviced while the Qt C++ event loop runs). Removed implicit `requested_state = IDLE` from `closeEvent` and reconnect cleanup. |
+| 2025-08 | Investigated calibration current settings from the interface; documented the distinct currents in §4.2 (`motor.config.calibration_current`, `axis.config.calibration_lockin.current`, `axis.config.general_lockin.current`, skip `sensorless_ramp.current`; + `resistance_calib_max_voltage`). Decision: expose them in a dedicated **Calibration** tab of the Control Settings surface (beside the existing three sections); requires an `axis` ref + dotted-path attribute support in `bind()`/row helpers. |
+| 2025-08 | Setpoints now require explicit confirmation: velocity/torque/position spinboxes no longer write on change — the active setpoint is sent only via the "Apply Setpoint" button or the Enter key. Added to the Design Principles (adjusting a field never commands the motor). |
+| 2025-08 | Replaced the single status label (which duplicated connection text) with a composed status footer (Plan.md §4.7): connection indicator ● Online/Offline/Connecting, Err: OK/err, bus voltage (V), and power draw (W = VBus × Ibus). Refreshed by the 100 ms poll; transient action messages stay separate. |
+| 2025-08 | Calibration finalize: after calibration + a functional test, set `encoder.config.pre_calibrated = true` (and motor `pre_calibrated` when applicable) then save. Saving rule added to Design Principles: any `save_configuration` is an explicit, user-confirmed action that puts the device into IDLE first. |
+| 2025-08 | Optional/"maybe-none" value access: added a shared `maybe_read(fn, default=None)` helper and a general rule (Plan.md §4.1) — no scattered `try/except: pass`; optional reads default to None, while disconnect-distinguishing reads and writes keep explicit targeted try/except. Refactored the state/live reads to use it. |
+| 2025-08 | Fix: on switching to closed-loop (and on connect), the active setpoint display now reads the device's current input setpoint (new `_sync_setpoint_from_device()` per control mode) instead of a stale/reset local value; removed the zeroing of the velocity spinbox on Stop. |
