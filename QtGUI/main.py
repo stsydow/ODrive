@@ -242,15 +242,15 @@ class ODriveGUI(QMainWindow):
 
         control_layout.addStretch()
 
-        control_layout.addWidget(QLabel("State:"))
-        # Selecting an item only changes the dropdown; the state is executed
-        # when the user presses "Execute State". This avoids accidentally
-        # triggering calibration routines just by browsing the list.
+        control_layout.addWidget(QLabel("Programm:"))
+        # Selecting an item only changes the dropdown; the program is started
+        # when the user presses "Start". This avoids accidentally triggering
+        # calibration routines just by browsing the list.
         self.state_combo = QComboBox()
         self.state_combo.addItems(STATE_MAP.keys())
         control_layout.addWidget(self.state_combo)
 
-        self.calib_button = QPushButton("Execute State")
+        self.calib_button = QPushButton("Start")
         self.calib_button.clicked.connect(self.on_calib_clicked)
         control_layout.addWidget(self.calib_button)
 
