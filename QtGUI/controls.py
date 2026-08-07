@@ -31,6 +31,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Slot
 
+from util import safe_getattr
+
 from odrive.enums import (
     CONTROL_MODE_POSITION_CONTROL,
     CONTROL_MODE_TORQUE_CONTROL,
@@ -117,17 +119,11 @@ class InputModeSelector(QComboBox):
         self._apply_for_mode(control_mode)
 
     def _read_mode(self):
-        try:
-            return self._controller.config.control_mode
-        except Exception:
-            return None
+        return safe_getattr(self._controller, "config", "control_mode")
 
     def _apply_for_mode(self, control_mode):
         allowed = self.MODES_BY_CONTROL.get(control_mode, [INPUT_MODE_PASSTHROUGH])
-        try:
-            cur = self._controller.config.input_mode
-        except Exception:
-            cur = None
+        cur = safe_getattr(self._controller, "config", "input_mode")
         if cur is not None and cur in allowed and cur != INPUT_MODE_PASSTHROUGH:
             select = cur
         else:
@@ -297,11 +293,12 @@ class _RowConfigPanel(QGroupBox):
                 box.blockSignals(True)
                 box.setEnabled(enabled)
                 if enabled:
-                    try:
-                        box.setValue(float(getattr(obj.config, attr)))
-                    except Exception as e:
+                    val = safe_getattr(obj.config, attr)
+                    if val is not None:
+                        box.setValue(float(val))
+                    else:
                         box.setEnabled(False)
-                        logger.debug("read %s failed: %s", attr, e)
+                        logger.debug("read %s failed", attr)
                 box.blockSignals(False)
             for attr, cb in self._check_boxes.items():
                 obj = self._obj(attr)
@@ -309,10 +306,9 @@ class _RowConfigPanel(QGroupBox):
                 cb.blockSignals(True)
                 cb.setEnabled(enabled)
                 if enabled:
-                    try:
-                        cb.setChecked(bool(getattr(obj.config, attr)))
-                    except Exception:
-                        pass
+                    val = safe_getattr(obj.config, attr)
+                    if val is not None:
+                        cb.setChecked(bool(val))
                 cb.blockSignals(False)
         finally:
             self._syncing = False

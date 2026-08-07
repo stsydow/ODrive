@@ -41,6 +41,8 @@ from controls import InputModeSelector, SettingsTabs
 # Phase 2: Error display & history (Plan.md §2)
 from monitoring import ErrorDialog, read_error_report
 
+from util import safe_getattr
+
 # Import fibre for ObjectLostError disconnect detection
 import fibre
 
@@ -117,26 +119,6 @@ def _state_display(value):
     return short or str(value)
 
 
-def maybe_read(fn, default=None):
-    """Return `fn()` if it succeeds, else `default` (None).
-
-    Centralises "get a value if available" so truly-optional device reads
-    (monitor values, live state) are handled consistently and logged once,
-    instead of scattered ``try/except: pass`` blocks that tend to rot into
-    hard-to-find bugs. The caller must handle `None`.
-
-    Only use for genuinely optional reads. Reads that must distinguish error
-    classes (e.g. ObjectLostError -> reconnect) keep explicit, targeted
-    try/except (see `_read_failed`). Never use a bare ``except: pass``.
-    """
-    try:
-        return fn()
-    except Exception as e:  # noqa: BLE001 - optional read, default on any failure
-        logger.debug("read failed (defaulting to %r): %s", default, e)
-        return default
-
-
-
 class _ClickableLabel(QLabel):
     """QLabel that emits `clicked` on mouse press (e.g. footer error field)."""
 
@@ -152,11 +134,10 @@ class ODriveGUI(QMainWindow):
 
     def __init__(self, verbose=False):
         super().__init__()
+        # Single source of truth: the connected ODrive root. axis/motor/
+        # encoder/controller are derived properties (see below) so they can
+        # never drift out of sync with the device or be left stale.
         self.odrive = None
-        self.axis = None
-        self.motor = None
-        self.encoder = None
-        self.controller = None
 
         self._connecting = False
         self._connected = False
@@ -178,6 +159,27 @@ class ODriveGUI(QMainWindow):
         # Auto-connect once the event loop is running
         QTimer.singleShot(500, self.connect_odrive)
 
+    # ── Device access ────────────────────────────────────────────────
+    # axis0/motor/encoder/controller are always derived from `self.odrive`
+    # (safe_getattr returns None if the device or a sub-object is missing, so
+    # these never raise and never go stale).
+
+    @property
+    def axis(self):
+        return safe_getattr(self.odrive, "axis0")
+
+    @property
+    def motor(self):
+        return safe_getattr(self.odrive, "axis0", "motor")
+
+    @property
+    def encoder(self):
+        return safe_getattr(self.odrive, "axis0", "encoder")
+
+    @property
+    def controller(self):
+        return safe_getattr(self.odrive, "axis0", "controller")
+
     def setup_ui(self):
         """Set up the main window UI."""
         self.setWindowTitle("ODrive Qt GUI - Axis 0")
@@ -187,9 +189,7 @@ class ODriveGUI(QMainWindow):
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
         main_layout.setSpacing(4)
-        main_layout.setContentsMargins(6, 6, 6, 6)
 
-        # ── Menu bar ────────────────────────────────────────────────
         menubar = self.menuBar()
         self.device_menu = menubar.addMenu("&Device")
 
@@ -217,19 +217,19 @@ class ODriveGUI(QMainWindow):
 
         self.device_menu.addSeparator()
 
-        errors_action = QAction("Errors…", self)
+        errors_action = QAction("Errors", self)
         errors_action.setStatusTip("Show decoded errors and error history")
         errors_action.triggered.connect(self._on_show_error_history)
         self.device_menu.addAction(errors_action)
 
         self.device_menu.addSeparator()
 
-        info_action = QAction("Device Info…", self)
+        info_action = QAction("Device Info", self)
         info_action.setStatusTip("Show serial number, firmware version and status")
         info_action.triggered.connect(self._on_show_device_info)
         self.device_menu.addAction(info_action)
 
-        dump_action = QAction("Dump Read Failures…", self)
+        dump_action = QAction("Dump Read Failures", self)
         dump_action.setStatusTip("Show the current read-failure counter")
         dump_action.triggered.connect(self._on_dump_state)
         self.device_menu.addAction(dump_action)
@@ -397,17 +397,14 @@ class ODriveGUI(QMainWindow):
             logger.debug("connect_odrive: already connecting, skipping")
             return
 
-        logger.debug("connect_odrive: called (odrive=%s, axis=%s)",
-                     self.odrive is not None, self.axis is not None)
+        logger.debug("connect_odrive: called (odrive=%s)",
+                     self.odrive is not None)
 
-        # Clean up stale references (UI-only: never stops the motor)
+        # Drop any stale device reference. axis/motor/encoder/controller are
+        # derived from `self.odrive`, so there is nothing else to clear.
         if self.odrive is not None:
-            self.axis = None
-            self.motor = None
-            self.encoder = None
-            self.controller = None
             self.odrive = None
-            logger.debug("connect_odrive: stale references cleared")
+            logger.debug("connect_odrive: stale device reference cleared")
 
         self._connecting = True
         self._read_fail_count = 0
@@ -444,10 +441,6 @@ class ODriveGUI(QMainWindow):
         """Handle successful connection in the main thread."""
         logger.debug("on_connected: wiring up device")
         self.odrive = odrv
-        self.axis = odrv.axis0
-        self.motor = self.axis.motor
-        self.encoder = self.axis.encoder
-        self.controller = self.axis.controller
         self._connecting = False
         self._read_fail_count = 0
         logger.debug("on_connected: axis0 wired (motor=%s, encoder=%s, controller=%s)",
@@ -516,9 +509,8 @@ class ODriveGUI(QMainWindow):
         """
         running = False
         if self._connected and self.axis is not None:
-            running = maybe_read(
-                lambda: self.axis.current_state == AXIS_STATE_CLOSED_LOOP_CONTROL,
-                default=False)
+            running = (safe_getattr(self.axis, "current_state")
+                       == AXIS_STATE_CLOSED_LOOP_CONTROL)
         cmd_ok = self._connected and running
         self.cmd_group.setEnabled(self._connected)
         self.vel_spinbox.setEnabled(cmd_ok)
@@ -540,9 +532,8 @@ class ODriveGUI(QMainWindow):
         """
         if self.controller is None:
             return
-        try:
-            actual_mode = self.controller.config.control_mode
-        except Exception:
+        actual_mode = safe_getattr(self.controller, "config", "control_mode")
+        if actual_mode is None:
             return
 
         if actual_mode == self._last_synced_mode:
@@ -567,10 +558,7 @@ class ODriveGUI(QMainWindow):
         """Return the current control mode, or None if controller is unavailable."""
         if self.controller is None:
             return None
-        try:
-            return self.controller.config.control_mode
-        except Exception:
-            return None
+        return safe_getattr(self.controller, "config", "control_mode")
 
     @Slot()
     def on_run_clicked(self):
@@ -598,11 +586,8 @@ class ODriveGUI(QMainWindow):
         new_mode = MODE_VALUES.get(mode)
         if new_mode is None:
             return
-        try:
-            if self.controller.config.control_mode == new_mode:
-                return
-        except Exception:
-            pass
+        if safe_getattr(self.controller, "config", "control_mode") == new_mode:
+            return
         try:
             self.controller.config.control_mode = new_mode
             if new_mode == CONTROL_MODE_VELOCITY_CONTROL:
@@ -626,27 +611,24 @@ class ODriveGUI(QMainWindow):
         if self.controller is None:
             return
         mode = self._current_control_mode()
-        try:
-            if mode == CONTROL_MODE_VELOCITY_CONTROL:
-                v = self.controller.input_vel
-                if v is not None:
-                    self.vel_spinbox.blockSignals(True)
-                    self.vel_spinbox.setValue(float(v))
-                    self.vel_spinbox.blockSignals(False)
-            elif mode == CONTROL_MODE_TORQUE_CONTROL:
-                t = self.controller.input_torque
-                if t is not None:
-                    self.torque_spinbox.blockSignals(True)
-                    self.torque_spinbox.setValue(float(t))
-                    self.torque_spinbox.blockSignals(False)
-            elif mode == CONTROL_MODE_POSITION_CONTROL:
-                p = self.controller.input_pos
-                if p is not None:
-                    self.pos_spinbox.blockSignals(True)
-                    self.pos_spinbox.setValue(float(p))
-                    self.pos_spinbox.blockSignals(False)
-        except Exception as e:
-            logger.debug("sync setpoint from device failed: %s", e)
+        if mode == CONTROL_MODE_VELOCITY_CONTROL:
+            v = safe_getattr(self.controller, "input_vel")
+            if v is not None:
+                self.vel_spinbox.blockSignals(True)
+                self.vel_spinbox.setValue(float(v))
+                self.vel_spinbox.blockSignals(False)
+        elif mode == CONTROL_MODE_TORQUE_CONTROL:
+            t = safe_getattr(self.controller, "input_torque")
+            if t is not None:
+                self.torque_spinbox.blockSignals(True)
+                self.torque_spinbox.setValue(float(t))
+                self.torque_spinbox.blockSignals(False)
+        elif mode == CONTROL_MODE_POSITION_CONTROL:
+            p = safe_getattr(self.controller, "input_pos")
+            if p is not None:
+                self.pos_spinbox.blockSignals(True)
+                self.pos_spinbox.setValue(float(p))
+                self.pos_spinbox.blockSignals(False)
 
     def _position_circular_range(self):
         """Return the circular setpoint range when circular position mode is
@@ -654,13 +636,10 @@ class ODriveGUI(QMainWindow):
         [0, range) so it matches the device's circular setpoint behaviour."""
         if self.controller is None:
             return None
-        try:
-            if self.controller.config.circular_setpoints:
-                rng = self.controller.config.circular_setpoint_range
-                if rng and float(rng) > 0:
-                    return float(rng)
-        except Exception:
-            pass
+        if safe_getattr(self.controller, "config", "circular_setpoints"):
+            rng = safe_getattr(self.controller, "config", "circular_setpoint_range")
+            if rng and float(rng) > 0:
+                return float(rng)
         return None
 
     def _make_setpoint_spin(self, minimum, maximum, decimals):
@@ -827,23 +806,16 @@ class ODriveGUI(QMainWindow):
             serial = odrive.get_serial_number_str_sync(self.odrive)
         except Exception:
             serial = "unknown"
-        try:
-            fw = ".".join(str(x) for x in (
-                self.odrive.fw_version_major,
-                self.odrive.fw_version_minor,
-                self.odrive.fw_version_revision,
-            ))
-        except Exception:
-            fw = "unknown"
-        try:
-            vbus = self.odrive.vbus_voltage
-        except Exception:
-            vbus = None
+        parts = (
+            safe_getattr(self.odrive, "fw_version_major"),
+            safe_getattr(self.odrive, "fw_version_minor"),
+            safe_getattr(self.odrive, "fw_version_revision"),
+        )
+        fw = ".".join(str(x) for x in parts) if None not in parts else "unknown"
+
         lines = [
             f"Serial number: {serial}",
             f"Firmware: {fw}",
-            f"VBus: {vbus:.2f} V" if vbus is not None else "VBus: unknown",
-            f"Axis0 error: {self.axis.error if self.axis is not None else 'n/a'}",
             f"Read failures: {self._read_fail_count}",
         ]
         logger.info("Device info:\n%s", "\n".join(lines))
@@ -932,7 +904,7 @@ class ODriveGUI(QMainWindow):
 
         # Keep the Control Command gating + footer state in sync each poll.
         self._update_control_enabled()
-        st = maybe_read(lambda: self.axis.current_state)
+        st = safe_getattr(self.axis, "current_state")
         if st is not None:
             self.state_status_label.setText(_state_display(st))
 

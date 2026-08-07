@@ -24,6 +24,8 @@ from PySide6.QtCore import Slot
 
 import odrive.enums
 
+from util import safe_getattr
+
 logger = logging.getLogger(__name__)
 
 MAX_HISTORY = 1000
@@ -75,13 +77,9 @@ def read_error_report(odrv, axis):
     report = ErrorReport(timestamp=time.time())
     sources = []
     for name, path, prefix in _ERROR_SOURCES:
-        value = 0
-        try:
-            obj = odrv if name == "system" else axis
-            for elem in path.split("."):
-                obj = getattr(obj, elem)
-            value = obj
-        except Exception:
+        obj = odrv if name == "system" else axis
+        value = safe_getattr(obj, *path.split("."))
+        if value is None:
             continue  # module not present on this firmware
         if value:
             sources.append(ErrorModule(name, value, _decode(value, prefix)))
