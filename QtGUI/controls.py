@@ -404,7 +404,7 @@ class SettingsTabs(_RowConfigPanel):
         self._check_specs = {}
         for spec in self._SPINS:
             *scalar, tab, group = spec
-            self._spin_specs[tab] = [*self._spin_specs.get(tab, []), tuple([*scalar, group])]
+            self._spin_specs[tab] = [*self._spin_specs.get(tab, []), (*scalar, group)]
         for spec in self._CHECKS:
             attr, base, label, tab, group = spec
             self._check_specs[tab] = [*self._check_specs.get(tab, []), (attr, base, label, group)]
