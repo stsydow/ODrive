@@ -25,11 +25,13 @@ QtGUI/main.py
   │     ├── read_error_report(odrv, axis)  # structured decode (system/axis/motor/enc/ctl...)
   │     └── ErrorDialog(QDialog)           # current errors + history, clear/export
   │                                       # opened via Device > Errors… or footer click
+  ├── util.py                         # Shared helpers
+  │     └── safe_getattr()                 # guarded nested getattr for device reads
   ├── ODriveGUI(QMainWindow)          # Main window, owns all UI & state
   │     ├── setup_ui()                # Layout: menus, Control Command, Control Settings
   │     ├── connect_odrive()          # Background thread → odrive.find_any()
   │     ├── _connect_worker()         # Daemon thread, delivers result via QTimer.singleShot
-  │     ├── _on_connected()           # Wire up axis, register _on_lost callback
+  │     ├── _on_connected()           # Store device; axis/motor/… are derived properties
   │     ├── _on_device_lost()         # Library notification → auto-reconnect
   │     ├── sync_ui_from_controller() # Poll controller.control_mode → update combo + spinboxes
   │     ├── update_readings()         # 100ms timer: read all values, detect disconnect
@@ -95,11 +97,9 @@ QtGUI/main.py
 │  Torque Setpoint (A): [   0.000   ▲▼ ]  ← hidden │
 │  Position Setpoint (rev): [   0.0000  ▲▼ ] est: 1.23 rev│← hidden │
 ├──────────────────────────────────────────────────┤
-│  ☑ Control Settings  (Phase 1, collapsible)       │
-│  ┌──────────────────────────────────────────────┐ │
-│  │ [Electrical | Mechanical | Control Params]  │ │
-│  │   tab rows: [Par (unit)___] [Par (unit)___] │ │
-│  └──────────────────────────────────────────────┘ │
+│  Control Settings                      (Phase 1) │
+│  [Electrical | Mechanical | Control Params]      │
+│    tab rows: [Par (unit)___] [Par (unit)___]     │
 ├──────────────────────────────────────────────────┤
 │  [Ready...]  ●Online  State:CLS_LOOP  Err:OK  24.5V  49.0W │  ← status bar
 └──────────────────────────────────────────────────┘
@@ -117,7 +117,9 @@ QtGUI/main.py
 | **States execute only via button** | Selecting a state in the dropdown only changes the selection; the `Execute State` button is the sole trigger, so browsing the list can never accidentally start a calibration. |
 | **`_on_lost.done()` guard** | If the device disconnects before the callback can be registered, `add_done_callback` would fire immediately in the connect thread. The `done()` check avoids this by scheduling a fresh reconnect instead. |
 | **`hasattr` for remote methods** | Before calling `odrv.reboot()`, the code checks with `hasattr` so that firmware variants without the reboot endpoint get a clear error message instead of an `AttributeError`. |
-| **Feature-gated control settings (Phase 1)** | `GainsPanel`/`InputModeSelector` read the device on `bind()` and disable any row the firmware doesn't expose (`hasattr` on `obj.config`), per Plan.md §4.2. Writes are wrapped and surfaced via a status callback; a `_syncing` guard suppresses write-backs during programmatic sync. |
+| **Feature-gated control settings (Phase 1)** | `SettingsTabs`/`InputModeSelector` read the device on `bind()` and disable any row the firmware doesn't expose (`hasattr` on `obj.config`), per Plan.md §4.2. Writes are wrapped and surfaced via a status callback; a `_syncing` guard suppresses write-backs during programmatic sync. |
+| **Single source of truth for the device** | `self.odrive` is the only stored device reference; `axis0`/`motor`/`encoder`/`controller` are derived `safe_getattr`-backed read-only properties. This removes the fragile five-field state that could go stale or drift out of sync (e.g. during reconnect), and simplifies cleanup in `connect_odrive`/`_on_connected`. |
+| **`safe_getattr` for device reads** | All optional attribute reads go through `safe_getattr(obj, *attrs, default=None)` — a guarded nested `getattr` that returns the default on a missing attribute or a raised remote read. It replaces scattered `try/except` blocks while `_read_value`/`_read_failed` still distinguish `ObjectLostError` for the reconnect fallback. |
 | **Device section → menu bar** | Save/Export/Import/Reboot moved from a group box to a **Device** menu on the menu bar. This declutters the main area and follows standard desktop GUI conventions. The menu is disabled until connected, just like the control widgets. |
 | **Connection status in the status bar footer** | The connection status is a permanent composed widget on the `QStatusBar` (connection indicator, error, bus voltage, power draw — Plan.md §4.7) instead of a dedicated group box. This keeps the main area focused on control and monitoring, while the footer always shows live state. Temporary action messages (save, export, etc.) appear via `showMessage()` on the left without duplicating the connection text. |
 | **Persistent status bar messages** | `showMessage(text, 0)` is used for connection progress ("Finding ODrive...", "Connected!") so they don't disappear after the default 3 s timeout. Action messages (save, export) still use the default transient timeout. |

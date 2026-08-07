@@ -3,7 +3,7 @@ Control Settings panel for the ODrive Qt GUI - Phase 1 (Plan.md §1).
 
 Layout (one level up for control params, which are config-editor values):
 
-    Control Settings (collapsible, main.py)
+    Control Settings (main.py)
       ├─ Input Mode selector
       ├─ Control Parameters            (gains / integrators / feed-forward)
       └─ Limits (QTabWidget)

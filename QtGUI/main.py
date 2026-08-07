@@ -364,16 +364,9 @@ class ODriveGUI(QMainWindow):
 
         main_layout.addWidget(self.cmd_group)
 
-        # ── Control Settings (Phase 1, collapsible) ─────────────────
-        self.controls_group = QGroupBox("Control Settings")
-        self.controls_group.setCheckable(True)
-        self.controls_group.setChecked(True)
-        self.controls_group.setToolTip("Untick to collapse")
-        cg_layout = QVBoxLayout(self.controls_group)
+        # ── Control Settings (Phase 1) ───────────────────────────────
         self.settings_tabs = SettingsTabs(self.statusBar().showMessage)
-        cg_layout.addWidget(self.settings_tabs)
-        self.controls_group.toggled.connect(self._on_controls_collapsed)
-        main_layout.addWidget(self.controls_group)
+        main_layout.addWidget(self.settings_tabs)
 
         # Note: the separate "Readings" group was removed; live estimates now
         # live beside their setpoints in the Control Command section and the
@@ -496,7 +489,7 @@ class ODriveGUI(QMainWindow):
         self.stop_button.setEnabled(enabled)
         self.state_combo.setEnabled(enabled)
         self.calib_button.setEnabled(enabled)
-        self.controls_group.setEnabled(enabled)
+        self.settings_tabs.setEnabled(enabled)
         self._update_control_enabled()
 
     def _update_control_enabled(self):
@@ -517,11 +510,6 @@ class ODriveGUI(QMainWindow):
         self.torque_spinbox.setEnabled(cmd_ok)
         self.pos_spinbox.setEnabled(cmd_ok)
         self.apply_button.setEnabled(cmd_ok)
-
-    @Slot(bool)
-    def _on_controls_collapsed(self, checked):
-        """Collapse/expand the Control Settings panel contents."""
-        self.settings_tabs.setVisible(checked)
 
     # ── Control handlers ──────────────────────────────────────────────
 

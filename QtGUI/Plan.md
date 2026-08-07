@@ -133,8 +133,8 @@ Dropdown with the relevant modes. The sewing machine recommendation is **VEL_RAM
 
 #### 1.3 Integration
 
-- `controls.py` (new) provides a `GainsPanel(QGroupBox)` (live-editable gain/limit/feed-forward spinboxes, read from device on connect) and an `InputModeSelector(QComboBox)`.
-- Placed as a collapsible "Control Settings" group box in the main window below the existing velocity control section.
+- `controls.py` (new) provides a `SettingsTabs(QTabWidget)` (live-editable gain/limit/feed-forward spinboxes, read from device on connect) and an `InputModeSelector(QComboBox)`.
+- Placed as a plain "Control Settings" section in the main window below the existing velocity control section (the box is *not* collapsible — it's always visible).
 
 ### Phase 2: Error Display & Config Browser (NOW)
 
@@ -320,7 +320,7 @@ except Exception as e:
 - **Write failures:** Shown immediately in status bar. Not fatal — device may be in a transient state.
 - **Calibration errors:** Decoded via `dump_errors()` logic, shown in the wizard step with a hint. User can retry or skip.
 
-**Accessing optional / "maybe-none" values (general rule):** do **not** scatter `try: read … except: pass`. For a genuinely optional read, use the shared `maybe_read(fn, default=None)` helper, which centrally catches, logs once, and returns `default`; the caller then checks for `None`. Two kinds of reads must stay as **explicit, targeted** `try/except` (never bare `except: pass`):
+**Accessing optional / "maybe-none" values (general rule):** do **not** scatter `try: read … except: pass`. For a genuinely optional attribute read, use the shared `safe_getattr(obj, *attrs, default=None)` helper (in `util.py`), which centrally walks a nested attribute path, catches missing attributes / raised remote reads, and returns `default`; the caller then checks for `None`. Two kinds of reads must stay as **explicit, targeted** `try/except` (never bare `except: pass`):
 - reads that must distinguish error classes (e.g. `ObjectLostError` → reconnect — see `_read_failed`), and
 - writes (they are surfaced, not swallowed).
 
@@ -492,7 +492,9 @@ corresponds to `pole_pairs = 8` in the working device config.
 | 2025-08 | Setpoints now require explicit confirmation: velocity/torque/position spinboxes no longer write on change — the active setpoint is sent only via the "Apply Setpoint" button or the Enter key. Added to the Design Principles (adjusting a field never commands the motor). |
 | 2025-08 | Replaced the single status label (which duplicated connection text) with a composed status footer (Plan.md §4.7): connection indicator ● Online/Offline/Connecting, Err: OK/err, bus voltage (V), and power draw (W = VBus × Ibus). Refreshed by the 100 ms poll; transient action messages stay separate. |
 | 2025-08 | Calibration finalize: after calibration + a functional test, set `encoder.config.pre_calibrated = true` (and motor `pre_calibrated` when applicable) then save. Saving rule added to Design Principles: any `save_configuration` is an explicit, user-confirmed action that puts the device into IDLE first. |
-| 2025-08 | Optional/"maybe-none" value access: added a shared `maybe_read(fn, default=None)` helper and a general rule (Plan.md §4.1) — no scattered `try/except: pass`; optional reads default to None, while disconnect-distinguishing reads and writes keep explicit targeted try/except. Refactored the state/live reads to use it. |
+| 2025-08 | Optional/"maybe-none" value access: added a shared `safe_getattr(obj, *attrs, default=None)` helper (guarded nested getattr for device reads; handles missing attributes and raised reads) and a general rule (Plan.md §4.1) — no scattered `try/except: pass`; optional reads default to None, while disconnect-distinguishing reads (`_read_value`/`_read_failed`) and writes keep explicit targeted try/except. Replaced `maybe_read(fn, default)` and the scattered attribute-read blocks across `main.py`, `controls.py`, `monitoring.py` with it. |
+| 2025-08 | Collapsed device state: the four stored references `axis`/`motor`/`encoder`/`controller` are gone; `self.odrive` is the single source of truth and the others are derived `safe_getattr`-backed read-only properties, so they can never go stale or drift out of sync. `connect_odrive`/`_on_connected` no longer hand-manage the object graph. |
+| 2025-08 | Removed the collapsible "Control Settings" group-box wrapper: the `SettingsTabs` panel is added directly to the main layout (no checkable box / toggle slot / intermediate layout), and the `_on_controls_collapsed` handler was deleted. |
 | 2025-08 | Fix: on switching to closed-loop (and on connect), the active setpoint display now reads the device's current input setpoint (new `_sync_setpoint_from_device()` per control mode) instead of a stale/reset local value; removed the zeroing of the velocity spinbox on Stop. |
 | 2025-08 | Phase 2 (error display) implemented: new `monitoring.py` with `read_error_report()` (structured decode of system/axis/motor/encoder/controller/sensorless), a live color-coded `ErrorPanel` with a bounded (1000) history and a history dialog (export to file). Replaced the raw error label and the Device menu's "Dump Errors"/"Clear Errors" with the decoded panel + a single "Errors…" history action. Fixed a source-base bug (axis module was reading odrv.error). Config Browser still pending (next). |
 | 2025-08 | Phase 2 (error display): moved the decoded-error view out of the layout (window was too tall) into an on-demand `ErrorDialog` — opened via Device > Errors… or by clicking the `Err:` footer indicator (now a `_ClickableLabel`). The poll keeps decoding into a bounded history; dialog shows current errors + history with clear/export. |
