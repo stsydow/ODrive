@@ -201,6 +201,26 @@ fix: read device setpoint into display on closed-loop entry
 
 Keep each commit focused on one concern; don't mix unrelated changes in a single commit.
 
+## Static Checks (`check.sh`)
+
+`./check.sh` runs the linters/type-checker against the QtGUI source (no install —
+it assumes `ruff` and `mypy` are already on PATH):
+
+- `ruff check .` — lint (uses `ruff.toml`; selects `E/F/I/UP/B/RUF/BLE` at a
+  120-char line length for the tabular config tables).
+- `mypy` on `main.py` / `controls.py` / `monitoring.py` / `util.py` — static typing.
+- `python -m py_compile` — syntax sanity.
+
+Optional formatting (not gated by `check.sh` — normalizes most of the codebase,
+so it's opt-in): `ruff format .`
+
+**Exception handling note:** device reads/writes catch only `DEVICE_EXCEPTIONS`
+(`util.py`) — the expected, transient fibre/odrive failures (`ObjectLostError`,
+`EOFError`, `TimeoutError`, `OSError`, `asyncio.CancelledError`). A bare generic
+`Exception` from libfibre ("internal error", "peer misbehaving", "unknown
+error") is treated as a bug and deliberately left uncaught so it surfaces with a
+stack trace rather than being silently swallowed.
+
 ## Dependencies
 
 - **PySide6 ≥ 6.0** — Qt bindings

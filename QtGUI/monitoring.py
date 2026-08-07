@@ -8,9 +8,10 @@ footer). Keeps the main window compact — no persistent in-layout error panel.
 
 import logging
 import time
-from collections import deque
 from dataclasses import dataclass, field
 
+import odrive.enums
+from PySide6.QtCore import Slot
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -20,9 +21,6 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QVBoxLayout,
 )
-from PySide6.QtCore import Slot
-
-import odrive.enums
 
 from util import safe_getattr
 
@@ -166,5 +164,5 @@ class ErrorDialog(QDialog):
         try:
             with open(path, "w") as f:
                 f.write(self.hist_tab.toPlainText())
-        except Exception as e:
+        except OSError as e:
             logger.warning("export failed: %s", e)

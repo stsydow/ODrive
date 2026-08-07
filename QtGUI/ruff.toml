@@ -1,0 +1,8 @@
+# Ruff configuration (lint/format) - ODrive Qt GUI.
+# Run with:  ruff check .   /   ruff format .
+# 120 chars: the config data tables (_SPINS/_CHECKS rows) are tabular and
+# naturally exceed 100.
+line-length = 120
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "RUF", "BLE"]

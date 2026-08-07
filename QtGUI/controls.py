@@ -17,21 +17,7 @@ attached firmware does not expose is disabled. Portable by design
 """
 
 import logging
-
-from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QDoubleSpinBox,
-    QGridLayout,
-    QGroupBox,
-    QLabel,
-    QTabWidget,
-    QVBoxLayout,
-    QWidget,
-)
-from PySide6.QtCore import Slot
-
-from util import safe_getattr
+from typing import ClassVar
 
 from odrive.enums import (
     CONTROL_MODE_POSITION_CONTROL,
@@ -43,6 +29,20 @@ from odrive.enums import (
     INPUT_MODE_TRAP_TRAJ,
     INPUT_MODE_VEL_RAMP,
 )
+from PySide6.QtCore import Slot
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QGridLayout,
+    QGroupBox,
+    QLabel,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from util import DEVICE_EXCEPTIONS, safe_getattr
 
 logger = logging.getLogger(__name__)
 
@@ -72,14 +72,14 @@ class InputModeSelector(QComboBox):
 
     # Valid input modes per control mode. Passthrough is an option but is
     # listed LAST (never the default) when a real shaping mode exists.
-    MODES_BY_CONTROL = {
+    MODES_BY_CONTROL: ClassVar[dict] = {
         CONTROL_MODE_VELOCITY_CONTROL: [INPUT_MODE_VEL_RAMP, INPUT_MODE_PASSTHROUGH],
         CONTROL_MODE_POSITION_CONTROL: [INPUT_MODE_POS_FILTER, INPUT_MODE_TRAP_TRAJ, INPUT_MODE_PASSTHROUGH],
         CONTROL_MODE_TORQUE_CONTROL: [INPUT_MODE_TORQUE_RAMP, INPUT_MODE_PASSTHROUGH],
     }
     # Fallback when the device input_mode is inapplicable to the control mode:
     # use the recommended mode, never Passthrough.
-    DEFAULT_BY_CONTROL = {
+    DEFAULT_BY_CONTROL: ClassVar[dict] = {
         CONTROL_MODE_VELOCITY_CONTROL: INPUT_MODE_VEL_RAMP,
         CONTROL_MODE_POSITION_CONTROL: INPUT_MODE_TRAP_TRAJ,
         CONTROL_MODE_TORQUE_CONTROL: INPUT_MODE_TORQUE_RAMP,
@@ -135,7 +135,7 @@ class InputModeSelector(QComboBox):
         if cur is not None and select != cur:
             try:
                 self._controller.config.input_mode = select
-            except Exception as e:
+            except DEVICE_EXCEPTIONS as e:
                 logger.warning("failed to set input_mode: %s", e)
 
     def _populate(self, select_value, allowed):
@@ -165,7 +165,7 @@ class InputModeSelector(QComboBox):
             self._controller.config.input_mode = value
             if self._status:
                 self._status(f"Input mode set to {self.currentText()}", 3000)
-        except Exception as e:
+        except DEVICE_EXCEPTIONS as e:
             logger.warning("Failed to set input_mode: %s", e)
             if self._status:
                 self._status(f"Failed to set input mode: {e}", 3000)
@@ -176,8 +176,8 @@ class _RowConfigPanel(QGroupBox):
     checkboxes into provided grid layouts, then read-on-bind / write-on-change
     with `hasattr` feature gating."""
 
-    _SPINS = ()   # subclass: (attr, base, label, unit, min, max, decimals, step)
-    _CHECKS = ()  # subclass: (attr, base, label)
+    _SPINS: ClassVar[list] = []   # subclass: (attr, base, label, unit, min, max, decimals, step)
+    _CHECKS: ClassVar[list] = []  # subclass: (attr, base, label)
 
     def __init__(self, title, status=None, parent=None):
         super().__init__(title, parent)
@@ -323,7 +323,7 @@ class _RowConfigPanel(QGroupBox):
         obj = self._obj(attr)
         try:
             setattr(obj.config, attr, value)
-        except Exception as e:
+        except DEVICE_EXCEPTIONS as e:
             logger.warning("Failed to set %s: %s", attr, e)
             if self._status:
                 self._status(f"Failed to set {attr}: {e}", 3000)
@@ -338,7 +338,7 @@ class _RowConfigPanel(QGroupBox):
         obj = self._obj(attr)
         try:
             setattr(obj.config, attr, bool(checked))
-        except Exception as e:
+        except DEVICE_EXCEPTIONS as e:
             logger.warning("Failed to set %s: %s", attr, e)
             if self._status:
                 self._status(f"Failed to set {attr}: {e}", 3000)
@@ -355,7 +355,7 @@ class SettingsTabs(_RowConfigPanel):
     _TABS = ("Electrical Limits", "Mechanical Limits", "Control Parameters")
 
     # (attr, base, label, unit, min, max, decimals, step, tab, group)
-    _SPINS = [
+    _SPINS: ClassVar[list] = [
         # tab 0: Electrical Limits
         ("current_lim", BASE_MOTOR, "Current limit", "A", 0.0, 60.0, 2, 0.1, 0, "cur"),
         ("current_lim_margin", BASE_MOTOR, "Current limit margin", "A", 0.0, 60.0, 2, 0.1, 0, "cur"),
@@ -374,7 +374,7 @@ class SettingsTabs(_RowConfigPanel):
         ("inertia", BASE_CONTROLLER, "Inertia (feed-forward)", "N·m/(turn/s²)", -50.0, 50.0, 4, 0.001, 2, "inertia"),
     ]
     # (attr, base, label, tab, group)
-    _CHECKS = [
+    _CHECKS: ClassVar[list] = [
         ("enable_vel_limit", BASE_CONTROLLER, "Enable velocity limit", 1, "vl"),
         ("enable_torque_mode_vel_limit", BASE_CONTROLLER, "Torque-mode velocity limit", 1, "vl"),
         ("enable_overspeed_error", BASE_CONTROLLER, "Overspeed error", 1, "ov"),
@@ -404,13 +404,13 @@ class SettingsTabs(_RowConfigPanel):
         self._check_specs = {}
         for spec in self._SPINS:
             *scalar, tab, group = spec
-            self._spin_specs[tab] = self._spin_specs.get(tab, []) + [tuple(scalar + [group])]
+            self._spin_specs[tab] = [*self._spin_specs.get(tab, []), tuple([*scalar, group])]
         for spec in self._CHECKS:
             attr, base, label, tab, group = spec
-            self._check_specs[tab] = self._check_specs.get(tab, []) + [(attr, base, label, group)]
+            self._check_specs[tab] = [*self._check_specs.get(tab, []), (attr, base, label, group)]
 
         # Temporarily swap in per-tab specs so the base writer fills each page.
-        for tab_idx, (page, lay) in enumerate(pages):
+        for tab_idx, (_page, lay) in enumerate(pages):
             self._SPINS = tuple(self._spin_specs.get(tab_idx, []))
             self._CHECKS = tuple(self._check_specs.get(tab_idx, []))
             self._write_scalar_rows(lay, start_row=0)

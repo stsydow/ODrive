@@ -10,44 +10,33 @@ import sys
 import threading
 from collections import deque
 
+from PySide6.QtCore import Qt, QTimer, Signal, Slot
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
-    QFileDialog,
-    QMainWindow,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QGroupBox,
-    QLabel,
-    QPushButton,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
     QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import QTimer, Slot, Signal, Qt
-from PySide6.QtGui import QAction
 
 # Make the ODrive tools package (tools/odrive) importable when running
 # directly from the QtGUI directory without prior installation.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "tools"))
 
+# Import fibre for ObjectLostError disconnect detection
+import fibre
 import odrive
 import odrive.configuration
 import odrive.enums
-
-# Phase 1: Control Settings (Plan.md §1)
-from controls import InputModeSelector, SettingsTabs
-
-# Phase 2: Error display & history (Plan.md §2)
-from monitoring import ErrorDialog, read_error_report
-
-from util import safe_getattr
-
-# Import fibre for ObjectLostError disconnect detection
-import fibre
-
 from odrive.enums import (
-    AXIS_ERROR_NONE,
     AXIS_STATE_CLOSED_LOOP_CONTROL,
     AXIS_STATE_ENCODER_DIR_FIND,
     AXIS_STATE_ENCODER_INDEX_SEARCH,
@@ -60,8 +49,14 @@ from odrive.enums import (
     CONTROL_MODE_POSITION_CONTROL,
     CONTROL_MODE_TORQUE_CONTROL,
     CONTROL_MODE_VELOCITY_CONTROL,
-    AxisError,
 )
+
+# Phase 1: Control Settings (Plan.md §1)
+from controls import InputModeSelector, SettingsTabs
+
+# Phase 2: Error display & history (Plan.md §2)
+from monitoring import ErrorDialog, read_error_report
+from util import DEVICE_EXCEPTIONS, safe_getattr
 
 logger = logging.getLogger(__name__)
 
@@ -415,7 +410,7 @@ class ODriveGUI(QMainWindow):
         try:
             odrv = odrive.find_any()
             logger.debug("connect_worker: find_any() returned device %s", odrv)
-        except Exception as e:
+        except DEVICE_EXCEPTIONS as e:
             # Capture the message string before the exception variable is
             # cleared (Python 3.14+ deletes it at the end of the except block).
             msg = str(e)
@@ -444,7 +439,7 @@ class ODriveGUI(QMainWindow):
                 return
             self.odrive._on_lost.add_done_callback(self._on_device_lost)
             logger.debug("on_connected: _on_device_lost callback registered")
-        except Exception as e:
+        except DEVICE_EXCEPTIONS as e:
             logger.warning("on_connected: _on_lost registration failed: %s", e)
 
         # Phase 1 control settings: load current device values + feature gate
@@ -583,7 +578,7 @@ class ODriveGUI(QMainWindow):
             # next 100ms poll).
             self.sync_ui_from_controller()
             self.statusBar().showMessage(f"Control mode set to {mode}", 3000)
-        except Exception as e:
+        except DEVICE_EXCEPTIONS as e:
             logger.warning("Failed to set control mode %s: %s", mode, e)
             self.statusBar().showMessage(f"Failed to set control mode: {e}", 3000)
 
@@ -672,7 +667,7 @@ class ODriveGUI(QMainWindow):
             else:
                 return
             self.statusBar().showMessage(f"{label} setpoint applied", 2000)
-        except Exception as e:
+        except DEVICE_EXCEPTIONS as e:
             self.statusBar().showMessage(f"Failed to apply setpoint: {e}", 3000)
 
     @Slot(str)
@@ -701,7 +696,7 @@ class ODriveGUI(QMainWindow):
         try:
             self.odrive.save_configuration()
             self.statusBar().showMessage("Configuration saved to device")
-        except Exception as e:
+        except DEVICE_EXCEPTIONS as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save configuration: {e}")
 
     @Slot()
@@ -717,7 +712,7 @@ class ODriveGUI(QMainWindow):
         try:
             odrive.configuration.backup_config(self.odrive, path, logger)
             self.statusBar().showMessage(f"Configuration exported to {path}")
-        except Exception as e:
+        except DEVICE_EXCEPTIONS as e:
             QMessageBox.critical(self, "Export Error", f"Failed to export configuration: {e}")
 
     @Slot()
@@ -740,7 +735,7 @@ class ODriveGUI(QMainWindow):
         try:
             odrive.configuration.restore_config(self.odrive, path, logger)
             self.statusBar().showMessage("Configuration imported — device rebooting")
-        except Exception as e:
+        except DEVICE_EXCEPTIONS as e:
             QMessageBox.critical(self, "Import Error", f"Failed to import configuration: {e}")
 
     @Slot()
@@ -766,7 +761,7 @@ class ODriveGUI(QMainWindow):
             self._set_controls_enabled(False)
             self.odrive.reboot()
             self.statusBar().showMessage("Device rebooting")
-        except Exception as e:
+        except DEVICE_EXCEPTIONS as e:
             QMessageBox.critical(self, "Reboot Error", f"Failed to reboot: {e}")
 
     # ── Debug helpers ─────────────────────────────────────────────────
@@ -787,7 +782,7 @@ class ODriveGUI(QMainWindow):
             return
         try:
             serial = odrive.get_serial_number_str_sync(self.odrive)
-        except Exception:
+        except DEVICE_EXCEPTIONS:
             serial = "unknown"
         parts = (
             safe_getattr(self.odrive, "fw_version_major"),
@@ -835,7 +830,7 @@ class ODriveGUI(QMainWindow):
         try:
             self.odrive.clear_errors()
             self.statusBar().showMessage("Cleared all errors", 3000)
-        except Exception as e:
+        except DEVICE_EXCEPTIONS as e:
             self.statusBar().showMessage(f"Failed to clear errors: {e}", 3000)
 
     # ── Readings update ───────────────────────────────────────────────
@@ -869,7 +864,7 @@ class ODriveGUI(QMainWindow):
         """
         try:
             value = fn()
-        except Exception as e:
+        except DEVICE_EXCEPTIONS as e:
             return None, self._read_failed(name, e)
         if setter is not None:
             setter(value)
