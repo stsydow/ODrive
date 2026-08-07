@@ -75,9 +75,9 @@ Axis 0 velocity control. See `ARCHITECTURE.md` for implementation details.
 torque mode switching, control-tuning tabs (Electrical Limits | Mechanical Limits |
 Control Parameters, feature-gated), an input-mode selector, setpoint spinboxes,
 Run/Stop, Programm dropdown + Start, 100 ms polling, save/export/import config,
-reboot, clear errors, on-demand decoded error dialog + bounded history, device
-info dialog (serial + hardware/firmware version), verbose logging (read failures
-go to the debug log, not a dialog).
+reboot, clear errors, on-demand event log (context + decoded error entries) and
+device info dialog (serial + hardware/firmware version), verbose logging (read
+failures go to the debug log, not a dialog).
 
 **Gaps (planned, see roadmap):** Calibration workflow (Phase 4), Config Browser
 (Phase 2.4), monitoring/plotting (Phase 3), foot-pedal analog input (Phase 5),
@@ -172,13 +172,18 @@ class AxisErrors:
 
 #### 2.2 Error Panel ✅ (as on-demand dialog)
 
-- Implemented as the on-demand `ErrorDialog` (opened via Device > Errors… or by clicking the `Err:` footer indicator) rather than an in-layout panel, to keep the window compact. Decoded names/values per error source, color-coded.
+- Implemented as the on-demand `LogDialog` (opened via Device > Errors… or by clicking the `Err:` footer indicator) rather than an in-layout panel, to keep the window compact. Decoded names/values per error source, color-coded.
 - Clear Errors button.
 - Replaces the single raw integer error label.
 
-#### 2.3 Error History ✅
+#### 2.3 Event Log / History ✅
 
-- Time-stamped deque (max 1000 entries), kept by the poll; shown in the ErrorDialog via Device menu, with export-to-file.
+- A time-stamped ring buffer (max 1000 `LogEntry`s) records a chronological timeline:
+  connect/disconnect, axis-state transitions, control-mode changes, setpoint
+  applies, config actions, and error transitions (new errors + clears). The
+  entries leading up to an error thus give context of what happened before it.
+- Shown in the `LogDialog`'s **Event Log** tab (via the Device menu), with
+  export-to-file; a separate **Current Errors** tab shows the live decoded set.
 
 #### 2.4 Config Browser (Read-Only) ⬜ TODO
 
@@ -186,7 +191,7 @@ class AxisErrors:
 
 #### 2.5 Integration ✅ (errors) / ⬜ (config browser)
 
-- `errors.py` provides: structured error decoding (`ErrorReport`/`ErrorModule` dataclasses), an on-demand `ErrorDialog` (decoded current errors + time-stamped history, export-to-file) that replaces the raw-integer error label, and a bounded history kept by the poll. ✅
+- `errors.py` provides: structured error decoding (`ErrorReport`/`ErrorModule` dataclasses), an on-demand `LogDialog` (time-stamped event log with context + error entries, plus current decoded errors, export-to-file) that replaces the raw-integer error label. ✅
 - `controls.py` also provides the read-only Config Browser dialog (`QDialog` + `QTreeWidget`). ⬜ not yet implemented
 - Device menu: the standalone "Dump Errors…"/"Clear Errors" become a single "Errors…" action (plus a clickable `Err:` footer field) that opens the error dialog; "Config Browser…" still to be added. ✅ / ⬜
 
@@ -506,7 +511,7 @@ corresponds to `pole_pairs = 8` in the working device config.
 | 2025-08 | Device Info dialog now also shows the hardware version (`hw_version_major`/`minor`/`variant`, formatted `vX.Y` with an optional `-NV` suffix) read via `safe_getattr`. Removed the "Dump Read Failures" dialog/menu action — read failures already go to the debug log (`_read_failed` logs once per distinct error; `update_readings` logs the fallback reconnect counter), so the popup was redundant. |
 | 2025-08 | Fix: on switching to closed-loop (and on connect), the active setpoint display now reads the device's current input setpoint (new `_sync_setpoint_from_device()` per control mode) instead of a stale/reset local value; removed the zeroing of the velocity spinbox on Stop. |
 | 2025-08 | Phase 2 (error display) implemented: new `errors.py` (renamed from `monitoring.py`) with `read_error_report()` (structured decode of system/axis/motor/encoder/controller/sensorless), a live color-coded `ErrorPanel` with a bounded (1000) history and a history dialog (export to file). Replaced the raw error label and the Device menu's "Dump Errors"/"Clear Errors" with the decoded panel + a single "Errors…" history action. Fixed a source-base bug (axis module was reading odrv.error). Config Browser still pending (next). |
-| 2025-08 | Phase 2 (error display): moved the decoded-error view out of the layout (window was too tall) into an on-demand `ErrorDialog` — opened via Device > Errors… or by clicking the `Err:` footer indicator (now a `_ClickableLabel`). The poll keeps decoding into a bounded history; dialog shows current errors + history with clear/export. |
+| 2025-08 | Phase 2 (error display): moved the decoded-error view out of the layout (window was too tall) into an on-demand viewer. Replaced the state-snapshot error history with a time-stamped **event log** (`LogDialog`): the log records connect/state/mode/setpoint/config/error/clear events so the run-up to an error shows context of what happened before; a separate Current Errors tab shows the live decoded set, with clear/export. Opened via Device > Errors… or the `Err:` footer indicator (`_ClickableLabel`). |
 | 2025-08 | Removed the "Readings" section; velocity & position estimates now live beside their setpoints in the "Control Command" area (compact `est:` labels). Bus voltage / power remain in the status footer. |
 | 2025-08 | Control Command rows are now mutually exclusive by control mode: the velocity setpoint row (incl. its estimate) is hidden unless in velocity mode, matching torque/position rows. |
 | 2025-08 | Unified the three Control Command setpoint rows: all built with shared `_make_setpoint_spin` / `_make_setpoint_row` helpers → identical `[label] [spinbox] [estimate?] [stretch]` layout; renamed `vel_set_row`→`vel_group`; immediate row-visibility on mode switch; dropped unused `format_current`/`QFont` imports. |

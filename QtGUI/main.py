@@ -8,6 +8,7 @@ import os
 import signal
 import sys
 import threading
+import time
 from collections import deque
 
 from PySide6.QtCore import Qt, QTimer, Signal, Slot
@@ -55,7 +56,7 @@ from odrive.enums import (
 from controls import InputModeSelector, SettingsTabs
 
 # Phase 2: Error display & history (Plan.md §2)
-from errors import ErrorDialog, read_error_report
+from errors import LogDialog, LogEntry, read_error_report
 from util import DEVICE_EXCEPTIONS, safe_getattr
 
 logger = logging.getLogger(__name__)
@@ -141,7 +142,7 @@ class ODriveGUI(QMainWindow):
         self._last_read_error = None
         self._last_report = None
         self._last_error_key = None
-        self.error_history = deque(maxlen=1000)
+        self.event_log = deque(maxlen=1000)
         self._verbose = verbose
 
         self.update_timer = QTimer()
@@ -451,6 +452,7 @@ class ODriveGUI(QMainWindow):
         self._set_conn("● Online", "green")
         self._set_controls_enabled(True)
         logger.info("Connected to ODrive")
+        self.log_event("CONNECT", "online (axis0 wired)")
 
     def _on_device_lost(self, _future):
         """Called from the odrive discovery thread when the device disconnects.
@@ -458,6 +460,7 @@ class ODriveGUI(QMainWindow):
         reconnect via a timer."""
         logger.warning("on_device_lost: connection lost (thread=%s, future.done=%s)",
                        threading.current_thread().name, _future.done())
+        self.log_event("CONNECT", "device lost, reconnecting")
         QTimer.singleShot(0, self, self.connect_odrive)
     def _on_connect_failed(self, msg):
         """Handle connection failure in the main thread."""
@@ -546,6 +549,7 @@ class ODriveGUI(QMainWindow):
         self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
         # Show the device's actual setpoint, not a stale/reset local value.
         self._sync_setpoint_from_device()
+        self.log_event("STATE", "Run: Closed Loop")
         self.statusBar().showMessage("Running - Closed Loop Control")
 
     @Slot()
@@ -554,6 +558,7 @@ class ODriveGUI(QMainWindow):
         if self.axis is None:
             return
         self.axis.requested_state = AXIS_STATE_IDLE
+        self.log_event("STATE", "Stop: Idle")
         self.statusBar().showMessage("Stopped - Idle")
 
     @Slot(str)
@@ -577,6 +582,7 @@ class ODriveGUI(QMainWindow):
             # Update the visible setpoint row immediately (not only at the
             # next 100ms poll).
             self.sync_ui_from_controller()
+            self.log_event("MODE", f"control mode -> {mode}")
             self.statusBar().showMessage(f"Control mode set to {mode}", 3000)
         except DEVICE_EXCEPTIONS as e:
             logger.warning("Failed to set control mode %s: %s", mode, e)
@@ -666,6 +672,12 @@ class ODriveGUI(QMainWindow):
                 label = "Position"
             else:
                 return
+            value = {
+                CONTROL_MODE_VELOCITY_CONTROL: self.vel_spinbox.value(),
+                CONTROL_MODE_TORQUE_CONTROL: self.torque_spinbox.value(),
+                CONTROL_MODE_POSITION_CONTROL: self.pos_spinbox.value(),
+            }[mode]
+            self.log_event("SETPOINT", f"{label} setpoint -> {value}")
             self.statusBar().showMessage(f"{label} setpoint applied", 2000)
         except DEVICE_EXCEPTIONS as e:
             self.statusBar().showMessage(f"Failed to apply setpoint: {e}", 3000)
@@ -678,6 +690,7 @@ class ODriveGUI(QMainWindow):
         state = STATE_MAP.get(state_str)
         if state is not None:
             self.axis.requested_state = state
+            self.log_event("STATE", f"Start: {state_str}")
         else:
             logger.warning("Unknown axis state requested: %s", state_str)
 
@@ -695,6 +708,7 @@ class ODriveGUI(QMainWindow):
             return
         try:
             self.odrive.save_configuration()
+            self.log_event("CFG", "saved config to NVM")
             self.statusBar().showMessage("Configuration saved to device")
         except DEVICE_EXCEPTIONS as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save configuration: {e}")
@@ -711,6 +725,7 @@ class ODriveGUI(QMainWindow):
             return
         try:
             odrive.configuration.backup_config(self.odrive, path, logger)
+            self.log_event("CFG", f"exported config to {path}")
             self.statusBar().showMessage(f"Configuration exported to {path}")
         except DEVICE_EXCEPTIONS as e:
             QMessageBox.critical(self, "Export Error", f"Failed to export configuration: {e}")
@@ -734,6 +749,7 @@ class ODriveGUI(QMainWindow):
             return
         try:
             odrive.configuration.restore_config(self.odrive, path, logger)
+            self.log_event("CFG", f"imported config from {path} (rebooting)")
             self.statusBar().showMessage("Configuration imported — device rebooting")
         except DEVICE_EXCEPTIONS as e:
             QMessageBox.critical(self, "Import Error", f"Failed to import configuration: {e}")
@@ -760,6 +776,7 @@ class ODriveGUI(QMainWindow):
             self._set_conn("● Rebooting…", "orange")
             self._set_controls_enabled(False)
             self.odrive.reboot()
+            self.log_event("CFG", "device rebooting")
             self.statusBar().showMessage("Device rebooting")
         except DEVICE_EXCEPTIONS as e:
             QMessageBox.critical(self, "Reboot Error", f"Failed to reboot: {e}")
@@ -812,15 +829,16 @@ class ODriveGUI(QMainWindow):
 
     @Slot()
     def _on_show_error_history(self):
-        """Open the decoded errors / history dialog (Device > Errors… or a
-        click on the footer error indicator)."""
+        """Open the event log / error viewer (Device > Errors… or a click on the
+        footer error indicator). Shows the chronological event log (with error
+        entries and prior context) plus the current decoded errors."""
         if self.odrive is None:
             QMessageBox.information(self, "Errors", "Not connected")
             return
         if self._last_report is None:
             self._last_report = read_error_report(self.odrive, self.axis)
-        dlg = ErrorDialog(self._last_report, self.error_history,
-                          clear_fn=self._clear_errors, parent=self)
+        dlg = LogDialog(self._last_report, self.event_log,
+                        clear_fn=self._clear_errors, parent=self)
         dlg.exec()
 
     def _clear_errors(self):
@@ -829,9 +847,17 @@ class ODriveGUI(QMainWindow):
             return
         try:
             self.odrive.clear_errors()
+            self.log_event("CLEAR", "cleared all errors")
             self.statusBar().showMessage("Cleared all errors", 3000)
         except DEVICE_EXCEPTIONS as e:
             self.statusBar().showMessage(f"Failed to clear errors: {e}", 3000)
+
+    def log_event(self, category, message):
+        """Append a timestamped entry to the in-memory event log (for the log
+        viewer) and mirror it to the debug log. Categories: CONNECT/STATE/
+        MODE/SETPOINT/CFG/ERROR/CLEAR."""
+        self.event_log.append(LogEntry(time.time(), category, message))
+        logger.debug("[%s] %s", category, message)
 
     # ── Readings update ───────────────────────────────────────────────
 
@@ -915,14 +941,21 @@ class ODriveGUI(QMainWindow):
                 pos = pos % rng  # wrap into [0, range) to match circular mode
             self.pos_estimate_label.setText(f"est: {pos:.4f} rev")
 
-        # Phase 2: decode errors; keep footer + bounded history (guarded
-        # optional reads — do not feed the disconnect counter).
+        # Phase 2: decode errors; keep footer + bounded event log (guarded
+        # optional reads — do not feed the disconnect counter). Log error
+        # transitions so the viewer shows context around each error.
         report = read_error_report(self.odrive, self.axis)
         self._last_report = report
         key = tuple(sorted((s.name, tuple(s.errors)) for s in report.sources))
         if key and key != self._last_error_key:
-            self.error_history.append(report)
+            detail = "; ".join(
+                f"{s.name}: {' | '.join(s.errors) if s.errors else f'0x{s.value:X}'}"
+                for s in report.sources)
+            self.log_event("ERROR", f"axis errors -> {detail}")
             self._last_error_key = key
+        elif not key and self._last_error_key:
+            self.log_event("CLEAR", "errors cleared")
+            self._last_error_key = None
         elif not key:
             self._last_error_key = None
         if report.any:

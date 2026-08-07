@@ -1,9 +1,12 @@
 """
-Error display & history for the ODrive Qt GUI - Phase 2 (Plan.md §2.1-2.3).
+Error decode + event log for the ODrive Qt GUI - Phase 2 (Plan.md §2.1-2.3).
 
-Provides structured error decoding and an on-demand error dialog (opened via
-the Device > Errors... menu or by clicking the error indicator in the status
-footer). Keeps the main window compact — no persistent in-layout error panel.
+Provides structured error decoding and an on-demand log viewer (opened via the
+Device > Errors... menu or by clicking the error indicator in the status footer).
+The viewer shows a time-stamped ring buffer of events (connect / state / mode /
+setpoint / config / error / clear ...) so the entries around an error give
+context of what happened before it. Keeps the main window compact — no persistent
+in-layout error panel.
 """
 
 import logging
@@ -26,7 +29,7 @@ from util import safe_getattr
 
 logger = logging.getLogger(__name__)
 
-MAX_HISTORY = 1000
+MAX_LOG = 1000
 
 # (display name, object path, enum prefix) read per poll
 _ERROR_SOURCES = (
@@ -67,6 +70,15 @@ class ErrorReport:
         return any(s.value for s in self.sources)
 
 
+@dataclass
+class LogEntry:
+    """One time-stamped event in the in-memory log."""
+
+    timestamp: float
+    category: str   # CONNECT / STATE / MODE / SETPOINT / CFG / ERROR / CLEAR
+    message: str
+
+
 def read_error_report(odrv, axis):
     """Read all error values into a structured ErrorReport.
 
@@ -96,48 +108,47 @@ def format_current(report):
     return "\n".join(lines)
 
 
-def format_history(history):
-    """Render a bounded history deque of ErrorReports to text."""
-    if not history:
-        return "(no errors recorded)"
+def format_log(entries):
+    """Render a bounded deque of LogEntries to text, oldest first."""
+    if not entries:
+        return "(no log entries yet)"
     lines = []
-    for rpt in history:
-        stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(rpt.timestamp))
-        parts = [f"== {stamp} =="]
-        for s in rpt.sources:
-            detail = " | ".join(s.errors) if s.errors else f"0x{s.value:X}"
-            parts.append(f"    {s.name}: {detail}")
-        lines.append("\n".join(parts))
-    return "\n\n".join(lines)
+    for e in entries:
+        stamp = time.strftime("%H:%M:%S", time.localtime(e.timestamp))
+        lines.append(f"[{stamp}] {e.category:<9} {e.message}")
+    return "\n".join(lines)
 
 
-class ErrorDialog(QDialog):
-    """On-demand error view: current decoded errors + history, with clear/export."""
+class LogDialog(QDialog):
+    """On-demand viewer: chronological event log (with error entries) plus the
+    current decoded errors, with clear/export."""
 
-    def __init__(self, report, history, clear_fn=None, parent=None):
+    def __init__(self, report, entries, clear_fn=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Errors")
-        self.resize(560, 440)
+        self.setWindowTitle("Log / Errors")
+        self.resize(640, 480)
         self._clear_fn = clear_fn
 
         outer = QVBoxLayout(self)
         self.tabs = QTabWidget()
 
-        cur_tab = QPlainTextEdit()
-        cur_tab.setReadOnly(True)
-        cur_tab.setPlainText(format_current(report))
-        self.tabs.addTab(cur_tab, "Current")
+        # Event log: context + error entries, oldest first.
+        self.log_tab = QPlainTextEdit()
+        self.log_tab.setReadOnly(True)
+        self.log_tab.setPlainText(format_log(entries))
+        self.tabs.addTab(self.log_tab, "Event Log")
 
-        self.hist_tab = QPlainTextEdit()
-        self.hist_tab.setReadOnly(True)
-        self.hist_tab.setPlainText(format_history(history))
-        self.tabs.addTab(self.hist_tab, "History")
+        # Current decoded errors (live snapshot).
+        self.cur_tab = QPlainTextEdit()
+        self.cur_tab.setReadOnly(True)
+        self.cur_tab.setPlainText(format_current(report))
+        self.tabs.addTab(self.cur_tab, "Current Errors")
         outer.addWidget(self.tabs)
 
         row = QHBoxLayout()
         self.clear_btn = QPushButton("Clear Errors")
         self.clear_btn.clicked.connect(self._clear)
-        export_btn = QPushButton("Export History…")
+        export_btn = QPushButton("Export Log…")
         export_btn.clicked.connect(self._export)
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
@@ -151,18 +162,18 @@ class ErrorDialog(QDialog):
     def _clear(self):
         if self._clear_fn:
             self._clear_fn()
-            # Refresh the current tab to reflect the just-cleared state.
-            self.tabs.widget(0).setPlainText("No errors.")
+            # Reflect the just-cleared state in the current-errors tab.
+            self.cur_tab.setPlainText("No errors.")
 
     @Slot()
     def _export(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Error History", "error_history.txt",
+            self, "Export Log", "odrive_log.txt",
             "Text Files (*.txt);;All Files (*)")
         if not path:
             return
         try:
             with open(path, "w") as f:
-                f.write(self.hist_tab.toPlainText())
+                f.write(self.log_tab.toPlainText())
         except OSError as e:
             logger.warning("export failed: %s", e)
