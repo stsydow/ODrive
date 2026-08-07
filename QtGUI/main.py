@@ -291,7 +291,6 @@ class ODriveGUI(QMainWindow):
         status_layout.addWidget(self.vbus_status_label)
         status_layout.addWidget(self.power_status_label)
         self.statusBar().addPermanentWidget(status_widget)
-        self.statusBar().showMessage("Ready", 0)
 
         # ── Control Command (setpoints, disabled unless closed-loop) ──
         self.cmd_group = QGroupBox("Control Command")
@@ -306,7 +305,7 @@ class ODriveGUI(QMainWindow):
         mode_layout.addSpacing(16)
         # Input mode: restricted to modes valid for the current control mode.
         mode_layout.addWidget(QLabel("Input Mode:"))
-        self.input_selector = InputModeSelector(self.statusBar().showMessage)
+        self.input_selector = InputModeSelector(self._ui_notify)
         mode_layout.addWidget(self.input_selector)
         mode_layout.addStretch()
         vel_layout.addLayout(mode_layout)
@@ -356,7 +355,7 @@ class ODriveGUI(QMainWindow):
         main_layout.addWidget(self.cmd_group)
 
         # ── Control Settings (Phase 1) ───────────────────────────────
-        self.settings_tabs = SettingsTabs(self.statusBar().showMessage)
+        self.settings_tabs = SettingsTabs(self._ui_notify)
         main_layout.addWidget(self.settings_tabs)
 
         # Note: the separate "Readings" group was removed; live estimates now
@@ -550,7 +549,6 @@ class ODriveGUI(QMainWindow):
         # Show the device's actual setpoint, not a stale/reset local value.
         self._sync_setpoint_from_device()
         self.log_event("STATE", "Run: Closed Loop")
-        self.statusBar().showMessage("Running - Closed Loop Control")
 
     @Slot()
     def on_stop_clicked(self):
@@ -559,7 +557,6 @@ class ODriveGUI(QMainWindow):
             return
         self.axis.requested_state = AXIS_STATE_IDLE
         self.log_event("STATE", "Stop: Idle")
-        self.statusBar().showMessage("Stopped - Idle")
 
     @Slot(str)
     def on_mode_changed(self, mode):
@@ -583,10 +580,9 @@ class ODriveGUI(QMainWindow):
             # next 100ms poll).
             self.sync_ui_from_controller()
             self.log_event("MODE", f"control mode -> {mode}")
-            self.statusBar().showMessage(f"Control mode set to {mode}", 3000)
         except DEVICE_EXCEPTIONS as e:
             logger.warning("Failed to set control mode %s: %s", mode, e)
-            self.statusBar().showMessage(f"Failed to set control mode: {e}", 3000)
+            self.log_event("MODE", f"failed to set mode {mode}: {e}")
 
     def _sync_setpoint_from_device(self):
         """Populate the active setpoint spinbox from the device's current
@@ -678,9 +674,8 @@ class ODriveGUI(QMainWindow):
                 CONTROL_MODE_POSITION_CONTROL: self.pos_spinbox.value(),
             }[mode]
             self.log_event("SETPOINT", f"{label} setpoint -> {value}")
-            self.statusBar().showMessage(f"{label} setpoint applied", 2000)
         except DEVICE_EXCEPTIONS as e:
-            self.statusBar().showMessage(f"Failed to apply setpoint: {e}", 3000)
+            self.log_event("SETPOINT", f"failed to apply setpoint: {e}")
 
     @Slot(str)
     def on_state_changed(self, state_str):
@@ -709,7 +704,6 @@ class ODriveGUI(QMainWindow):
         try:
             self.odrive.save_configuration()
             self.log_event("CFG", "saved config to NVM")
-            self.statusBar().showMessage("Configuration saved to device")
         except DEVICE_EXCEPTIONS as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save configuration: {e}")
 
@@ -726,7 +720,6 @@ class ODriveGUI(QMainWindow):
         try:
             odrive.configuration.backup_config(self.odrive, path, logger)
             self.log_event("CFG", f"exported config to {path}")
-            self.statusBar().showMessage(f"Configuration exported to {path}")
         except DEVICE_EXCEPTIONS as e:
             QMessageBox.critical(self, "Export Error", f"Failed to export configuration: {e}")
 
@@ -750,7 +743,6 @@ class ODriveGUI(QMainWindow):
         try:
             odrive.configuration.restore_config(self.odrive, path, logger)
             self.log_event("CFG", f"imported config from {path} (rebooting)")
-            self.statusBar().showMessage("Configuration imported — device rebooting")
         except DEVICE_EXCEPTIONS as e:
             QMessageBox.critical(self, "Import Error", f"Failed to import configuration: {e}")
 
@@ -777,7 +769,6 @@ class ODriveGUI(QMainWindow):
             self._set_controls_enabled(False)
             self.odrive.reboot()
             self.log_event("CFG", "device rebooting")
-            self.statusBar().showMessage("Device rebooting")
         except DEVICE_EXCEPTIONS as e:
             QMessageBox.critical(self, "Reboot Error", f"Failed to reboot: {e}")
 
@@ -788,8 +779,7 @@ class ODriveGUI(QMainWindow):
         """Toggle DEBUG-level logging on the root logger."""
         logging.getLogger().setLevel(logging.DEBUG if checked else logging.INFO)
         logger.info("Verbose logging %s", "enabled" if checked else "disabled")
-        self.statusBar().showMessage("Verbose logging enabled" if checked
-                                     else "Verbose logging disabled", 3000)
+        self.log_event("APP", f"verbose logging {'enabled' if checked else 'disabled'}")
 
     @Slot()
     def _on_show_device_info(self):
@@ -848,9 +838,8 @@ class ODriveGUI(QMainWindow):
         try:
             self.odrive.clear_errors()
             self.log_event("CLEAR", "cleared all errors")
-            self.statusBar().showMessage("Cleared all errors", 3000)
         except DEVICE_EXCEPTIONS as e:
-            self.statusBar().showMessage(f"Failed to clear errors: {e}", 3000)
+            self.log_event("CLEAR", f"failed to clear errors: {e}")
 
     def log_event(self, category, message):
         """Append a timestamped entry to the in-memory event log (for the log
@@ -858,6 +847,11 @@ class ODriveGUI(QMainWindow):
         MODE/SETPOINT/CFG/ERROR/CLEAR."""
         self.event_log.append(LogEntry(time.time(), category, message))
         logger.debug("[%s] %s", category, message)
+
+    def _ui_notify(self, msg, *_):
+        """Callback for the config panels' write feedback — routed into the
+        event log (the transient status-bar messages were removed)."""
+        self.log_event("APP", msg)
 
     # ── Readings update ───────────────────────────────────────────────
 

@@ -385,7 +385,9 @@ A composed status footer (permanent right-hand widget in the status bar) shows, 
 - **Bus voltage** (V), from `vbus_voltage`.
 - **Power draw** (W) = `vbus_voltage × ibus`.
 
-Transient action messages (save/export/apply/verbose) still use `showMessage()` on the left and never duplicate the connection state.
+Transient action feedback (save/export/apply/verbose, write failures) is recorded
+in the in-memory event log viewable via Device > Errors…; the status bar shows only
+the permanent connection/state/error/bus states.
 
 ---
 
