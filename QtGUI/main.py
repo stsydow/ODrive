@@ -225,14 +225,9 @@ class ODriveGUI(QMainWindow):
         self.device_menu.addSeparator()
 
         info_action = QAction("Device Info", self)
-        info_action.setStatusTip("Show serial number, firmware version and status")
+        info_action.setStatusTip("Show serial, hardware/firmware version and status")
         info_action.triggered.connect(self._on_show_device_info)
         self.device_menu.addAction(info_action)
-
-        dump_action = QAction("Dump Read Failures", self)
-        dump_action.setStatusTip("Show the current read-failure counter")
-        dump_action.triggered.connect(self._on_dump_state)
-        self.device_menu.addAction(dump_action)
 
         # ── Debug menu ────────────────────────────────────────────────
         debug_menu = menubar.addMenu("&Debug")
@@ -786,7 +781,7 @@ class ODriveGUI(QMainWindow):
 
     @Slot()
     def _on_show_device_info(self):
-        """Show serial number, firmware version and live status."""
+        """Show serial number, hardware/firmware version and read status."""
         if self.odrive is None:
             QMessageBox.information(self, "Device Info", "Not connected")
             return
@@ -801,26 +796,24 @@ class ODriveGUI(QMainWindow):
         )
         fw = ".".join(str(x) for x in parts) if None not in parts else "unknown"
 
+        hw_major = safe_getattr(self.odrive, "hw_version_major")
+        hw_minor = safe_getattr(self.odrive, "hw_version_minor")
+        hw_variant = safe_getattr(self.odrive, "hw_version_variant")
+        if hw_major is not None and hw_minor is not None:
+            hw = f"v{hw_major}.{hw_minor}"
+            if hw_variant:
+                hw += f"-{hw_variant}V"
+        else:
+            hw = "unknown"
+
         lines = [
             f"Serial number: {serial}",
             f"Firmware: {fw}",
+            f"Hardware: {hw}",
             f"Read failures: {self._read_fail_count}",
         ]
         logger.info("Device info:\n%s", "\n".join(lines))
         QMessageBox.information(self, "Device Info", "\n".join(lines))
-
-    @Slot()
-    def _on_dump_state(self):
-        """Show internal connection state for debugging."""
-        lines = [
-            f"Connecting: {self._connecting}",
-            f"Connected: {self.odrive is not None}",
-            f"Read failures: {self._read_fail_count} (threshold {RECONNECT_FAIL_THRESHOLD})",
-            f"Last synced mode: {self._last_synced_mode}",
-            f"Retry delay: {RECONNECT_RETRY_DELAY_MS} ms",
-        ]
-        logger.info("Internal state:\n%s", "\n".join(lines))
-        QMessageBox.information(self, "Internal State", "\n".join(lines))
 
     @Slot()
     def _on_show_error_history(self):

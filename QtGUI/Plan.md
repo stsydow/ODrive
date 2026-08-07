@@ -74,7 +74,8 @@ control. See `ARCHITECTURE.md` for full details.
 **Capabilities now:** Auto-connect/reconnect, velocity/position/torque mode
 switching, setpoint spinboxes, Run/Stop, all axis states via dropdown + button,
 100 ms polling of basic readings, save/export/import config, reboot, clear errors,
-device info dialog, verbose logging, read-failure counter.
+device info dialog (serial + hardware/firmware version), verbose logging (read
+failures go to the debug log, not a dialog).
 
 **Gaps:** No calibration workflow, no control tuning (gains, limits, input mode),
 no decoded error display, no hall sensor awareness, no monitoring history/plotting,
@@ -495,6 +496,7 @@ corresponds to `pole_pairs = 8` in the working device config.
 | 2025-08 | Optional/"maybe-none" value access: added a shared `safe_getattr(obj, *attrs, default=None)` helper (guarded nested getattr for device reads; handles missing attributes and raised reads) and a general rule (Plan.md §4.1) — no scattered `try/except: pass`; optional reads default to None, while disconnect-distinguishing reads (`_read_value`/`_read_failed`) and writes keep explicit targeted try/except. Replaced `maybe_read(fn, default)` and the scattered attribute-read blocks across `main.py`, `controls.py`, `monitoring.py` with it. |
 | 2025-08 | Collapsed device state: the four stored references `axis`/`motor`/`encoder`/`controller` are gone; `self.odrive` is the single source of truth and the others are derived `safe_getattr`-backed read-only properties, so they can never go stale or drift out of sync. `connect_odrive`/`_on_connected` no longer hand-manage the object graph. |
 | 2025-08 | Removed the collapsible "Control Settings" group-box wrapper: the `SettingsTabs` panel is added directly to the main layout (no checkable box / toggle slot / intermediate layout), and the `_on_controls_collapsed` handler was deleted. |
+| 2025-08 | Device Info dialog now also shows the hardware version (`hw_version_major`/`minor`/`variant`, formatted `vX.Y` with an optional `-NV` suffix) read via `safe_getattr`. Removed the "Dump Read Failures" dialog/menu action — read failures already go to the debug log (`_read_failed` logs once per distinct error; `update_readings` logs the fallback reconnect counter), so the popup was redundant. |
 | 2025-08 | Fix: on switching to closed-loop (and on connect), the active setpoint display now reads the device's current input setpoint (new `_sync_setpoint_from_device()` per control mode) instead of a stale/reset local value; removed the zeroing of the velocity spinbox on Stop. |
 | 2025-08 | Phase 2 (error display) implemented: new `monitoring.py` with `read_error_report()` (structured decode of system/axis/motor/encoder/controller/sensorless), a live color-coded `ErrorPanel` with a bounded (1000) history and a history dialog (export to file). Replaced the raw error label and the Device menu's "Dump Errors"/"Clear Errors" with the decoded panel + a single "Errors…" history action. Fixed a source-base bug (axis module was reading odrv.error). Config Browser still pending (next). |
 | 2025-08 | Phase 2 (error display): moved the decoded-error view out of the layout (window was too tall) into an on-demand `ErrorDialog` — opened via Device > Errors… or by clicking the `Err:` footer indicator (now a `_ClickableLabel`). The poll keeps decoding into a bounded history; dialog shows current errors + history with clear/export. |
