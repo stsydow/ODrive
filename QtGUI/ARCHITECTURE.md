@@ -21,10 +21,14 @@ QtGUI/main.py
   ├── controls.py                     # Phase 1: Control Settings
   │     ├── SettingsTabs(QTabWidget)       # Electrical | Mechanical | Control Params
   │     └── InputModeSelector(QComboBox)
-  ├── errors.py                       # Phase 2: Error decode + on-demand dialog
+  ├── errors.py                       # Phase 2: current error decode + dialog
   │     ├── read_error_report(odrv, axis)  # structured decode (system/axis/motor/enc/ctl...)
-  │     └── LogDialog(QDialog)              # event log (context + errors) + current errors, clear/export
-  │                                       # opened via Device > Errors… or footer click
+  │     └── ErrorDialog(QDialog)           # current decoded errors + clear
+  │                                       # opened via Device > Errors… or footer
+  ├── eventlog.py                    # In-memory UI/device event log + viewer
+  │     ├── LogEntry / format_log          # time-stamped events (connect/state/…)
+  │     └── LogDialog(QDialog)             # event log + export
+  │                                       # opened via Debug > Event Log… (works offline)
   ├── util.py                         # Shared helpers
   │     └── safe_getattr()                 # guarded nested getattr for device reads
   │
@@ -124,13 +128,13 @@ QtGUI/main.py
 | **Single source of truth for the device** | `self.odrive` is the only stored device reference; `axis0`/`motor`/`encoder`/`controller` are derived `safe_getattr`-backed read-only properties. This removes the fragile five-field state that could go stale or drift out of sync (e.g. during reconnect), and simplifies cleanup in `connect_odrive`/`_on_connected`. |
 | **`safe_getattr` for device reads** | All optional attribute reads go through `safe_getattr(obj, *attrs, default=None)` — a guarded nested `getattr` that returns the default on a missing attribute or a raised remote read. It replaces scattered `try/except` blocks while `_read_value`/`_read_failed` still distinguish `ObjectLostError` for the reconnect fallback. |
 | **Device section → menu bar** | Save/Export/Import/Reboot moved from a group box to a **Device** menu on the menu bar. This declutters the main area and follows standard desktop GUI conventions. The menu is disabled until connected, just like the control widgets. |
-| **Connection status in the status bar footer** | The connection status is a permanent composed widget on the `QStatusBar` (connection indicator, error, bus voltage, power draw — Plan.md §4.7) instead of a dedicated group box. This keeps the main area focused on control and monitoring, while the footer always shows live state. Transient action feedback is recorded in the in-memory event log (Device > Errors…) rather than the status bar. |
+| **Connection status in the status bar footer** | The connection status is a permanent composed widget on the `QStatusBar` (connection indicator, error, bus voltage, power draw — Plan.md §4.7) instead of a dedicated group box. This keeps the main area focused on control and monitoring, while the footer always shows live state. Transient action feedback is recorded in the in-memory event log (Debug > Event Log…) rather than the status bar. |
 | **No transient status-bar messages** | Action feedback (save/export/apply/verbose) and write failures go to the event log viewer (`log_event`), not ephemeral `statusBar().showMessage()` calls — the log provides persistent context. |
 | **Debug menu** | A Debug menu provides a verbose logging toggle and force reconnect — useful for diagnosing connection issues without restarting the GUI. (Device Info lives in the **Device** menu.) |
 | **No connect/disconnect button** | Auto-connect on startup + auto-reconnect on loss makes a manual button redundant. The status bar shows the current state. |
 | **UI never stops the motor (monitor-only)** | Per the general project rule, closing the window or reconnecting must not command the device. `closeEvent()` only stops the poll timer; reconnect only tears down GUI references. The motor is commanded **exclusively** via the explicit Run / Stop / Execute-State actions. |
 | **Ctrl+C via `SIG_DFL`** | The Qt event loop is a blocking C++ call, so a Python `KeyboardInterrupt` is not serviced during `app.exec()` (a timer "nudge" is unreliable). Restoring the default SIGINT action (`signal.signal(SIGINT, SIG_DFL)`) makes Ctrl+C terminate the process at the OS level, reliably from any state (including while "finding device"). Safe because the GUI is monitor-only. |
-| **Errors as an on-demand log viewer** | To keep the window compact, errors are shown in an on-demand `LogDialog` opened from the Device > Errors… menu or by clicking the `Err:` indicator in the status footer (`_ClickableLabel`). It shows a time-stamped **event log** (connect/state/mode/setpoint/error/clear entries — so the run-up to an error has context) plus the current decoded errors, with clear/export. |
+| **Errors and event log as on-demand dialogs** | To keep the window compact, the current decoded errors are shown in `ErrorDialog` (Device > Errors… or the `Err:` footer indicator), and the time-stamped **event log** — connect/state/mode/setpoint/error/clear entries giving context around an error — is in `LogDialog` (Debug > Event Log…). The event-log viewer works even while disconnected, so the run-up to a disconnect stays visible. |
 | **Confirmed setpoint apply** | The velocity/torque/position spinboxes do **not** write on change. The active setpoint is written to the device only on explicit confirmation — an "Apply Setpoint" button or the Enter key (`lineEdit().returnPressed`). Adjusting a field never moves the motor. |
 | **Control Command gating + state in footer** | The renamed "Control Command" section keeps its mode combo usable when connected, but the setpoint/Apply inputs are enabled only while the axis is in `CLOSED_LOOP_CONTROL` (checked each 100 ms poll). The current axis state is always shown in the status footer (`AXIS_STATE_NAMES` reverse map), not only while running. |
 ## Threading Model
@@ -211,7 +215,7 @@ it assumes `ruff` and `mypy` are already on PATH):
 
 - `ruff check .` — lint (uses `ruff.toml`; selects `E/F/I/UP/B/RUF/BLE` at a
   120-char line length for the tabular config tables).
-- `mypy` on `main.py` / `controls.py` / `errors.py` / `util.py` — static typing.
+- `mypy` on `main.py` / `controls.py` / `errors.py` / `eventlog.py` / `util.py` — static typing.
 - `python -m py_compile` — syntax sanity.
 
 Optional formatting (not gated by `check.sh` — normalizes most of the codebase,

@@ -60,8 +60,9 @@ from odrive.enums import (
 # Phase 1: Control Settings (Plan.md §1)
 from controls import InputModeSelector, SettingsTabs
 
-# Phase 2: Error display & history (Plan.md §2)
-from errors import LogDialog, LogEntry, read_error_report
+# Phase 2: Error display (Device menu / footer) + event log (Debug menu)
+from errors import ErrorDialog, read_error_report
+from eventlog import LogDialog, LogEntry
 from util import DEVICE_EXCEPTIONS, safe_getattr
 
 logger = logging.getLogger(__name__)
@@ -832,27 +833,20 @@ class ODriveGUI(QMainWindow):
     @Slot()
     def _on_show_event_log(self):
         """Open the event-log viewer from the Debug menu. Always available —
-        works even while disconnected so the run-up to a disconnect is visible.
-        Includes current decoded errors only when a device is attached."""
-        report = self._last_report
-        if report is None and self.odrive is not None:
-            report = read_error_report(self.odrive, self.axis)
-            self._last_report = report
-        dlg = LogDialog(report, self.event_log, clear_fn=self._clear_errors,
-                        parent=self)
+        works even while disconnected so the run-up to a disconnect is visible."""
+        dlg = LogDialog(self.event_log, parent=self)
         dlg.exec()
 
     def _on_show_error_history(self):
-        """Open the event log / error viewer (Device > Errors… or a click on the
-        footer error indicator). Shows the chronological event log (with error
-        entries and prior context) plus the current decoded errors."""
+        """Open the current-errors dialog (Device > Errors… or the footer Err
+        indicator)."""
         if self.odrive is None:
             QMessageBox.information(self, "Errors", "Not connected")
             return
         if self._last_report is None:
             self._last_report = read_error_report(self.odrive, self.axis)
-        dlg = LogDialog(self._last_report, self.event_log,
-                        clear_fn=self._clear_errors, parent=self)
+        dlg = ErrorDialog(self._last_report,
+                          clear_fn=self._clear_errors, parent=self)
         dlg.exec()
 
     def _clear_errors(self):
