@@ -29,8 +29,13 @@ from PySide6.QtWidgets import (
 )
 
 # Make the ODrive tools package (tools/odrive) importable when running
-# directly from the QtGUI directory without prior installation.
+# directly from the QtGUI directory without prior installation. `fibre`
+# (libfibre) ships inside tools/odrive/pyfibre; odrive/__init__ adds that path
+# when imported, but we add it explicitly too so `import fibre` works
+# regardless of import ordering. Keep these as bare inline sys.path.insert
+# calls (no assignment) so ruff's E402 bootstrap allowance still applies.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "tools"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "tools", "odrive", "pyfibre"))
 
 # Import fibre for ObjectLostError disconnect detection
 import fibre
@@ -233,6 +238,13 @@ class ODriveGUI(QMainWindow):
         self.verbose_action.setStatusTip("Enable DEBUG-level logging to console")
         self.verbose_action.toggled.connect(self._on_verbose_toggled)
         debug_menu.addAction(self.verbose_action)
+
+        log_action = QAction("Event Log…", self)
+        log_action.setStatusTip("Show the UI/device event log (works even while disconnected)")
+        log_action.triggered.connect(self._on_show_event_log)
+        debug_menu.addAction(log_action)
+
+        debug_menu.addSeparator()
 
         reconnect_action = QAction("Force Reconnect", self)
         reconnect_action.setStatusTip("Drop the current connection and reconnect")
@@ -818,6 +830,18 @@ class ODriveGUI(QMainWindow):
         QMessageBox.information(self, "Device Info", "\n".join(lines))
 
     @Slot()
+    def _on_show_event_log(self):
+        """Open the event-log viewer from the Debug menu. Always available —
+        works even while disconnected so the run-up to a disconnect is visible.
+        Includes current decoded errors only when a device is attached."""
+        report = self._last_report
+        if report is None and self.odrive is not None:
+            report = read_error_report(self.odrive, self.axis)
+            self._last_report = report
+        dlg = LogDialog(report, self.event_log, clear_fn=self._clear_errors,
+                        parent=self)
+        dlg.exec()
+
     def _on_show_error_history(self):
         """Open the event log / error viewer (Device > Errors… or a click on the
         footer error indicator). Shows the chronological event log (with error

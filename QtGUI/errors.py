@@ -138,10 +138,12 @@ class LogDialog(QDialog):
         self.log_tab.setPlainText(format_log(entries))
         self.tabs.addTab(self.log_tab, "Event Log")
 
-        # Current decoded errors (live snapshot).
+        # Current decoded errors (live snapshot; empty when no device).
         self.cur_tab = QPlainTextEdit()
         self.cur_tab.setReadOnly(True)
-        self.cur_tab.setPlainText(format_current(report))
+        self.cur_tab.setPlainText(
+            format_current(report) if report is not None
+            else "(no current-error snapshot — device not connected)")
         self.tabs.addTab(self.cur_tab, "Current Errors")
         outer.addWidget(self.tabs)
 
