@@ -228,6 +228,44 @@ so it's opt-in): `ruff format .`
 error") is treated as a bug and deliberately left uncaught so it surfaces with a
 stack trace rather than being silently swallowed.
 
+## Development Principles (session retrospective)
+
+Durable decisions distilled from development; keep these in mind for new work.
+
+- **Single source of truth / derived state.** Store the root (`self.odrive`);
+  derive `axis`/`motor`/`encoder`/`controller` via `safe_getattr` properties so
+  they can never go stale or drift. Store as few working copies as possible.
+- **An accessor that just returns a field is dead weight.** Only centralize
+  meaningfully; a plain alias adds indirection with no value — drop it.
+- **Never blanket-swallow `Exception`.** Catch the specific, expected failures
+  (`util.DEVICE_EXCEPTIONS`) and let genuine bugs (e.g. a generic libfibre
+  `Exception`) surface with a stack trace. Centralize read handling
+  (`safe_getattr` / `_read_value` / `_read_failed`) so failures log once and
+  `ObjectLostError` still drives reconnect.
+- **Split high-complexity methods** (C901). Break a thick function into
+  single-purpose helpers (see the `update_readings` poll). Some complexity is
+  inherent to a poll loop — a targeted `# noqa: C901` is acceptable.
+- **Long-lived "log/view" windows: non-modal + observe.** Use `show()` (not
+  blocking `exec()`) on a single shared instance, and push updates via a Qt
+  signal (e.g. `log_updated`) that the view subscribes to — reactive, not a
+  polling timer and not a static snapshot.
+- **Event log vs commands.** `log_event` records *what the device did* (device
+  events) as the causal abstraction; UI *commands* are logged too, only because
+  they provide context once realtime data is gone. Realtime data/evidence is
+  deferred to the plotting phase (a bounded buffer will arrive with it).
+- **Don't lint vendored/third-party code.** `ruff.toml` excludes `../tools`
+  (upstream ODrive) and `../GUI` (legacy). Lint only what we own.
+- **`sys.path` bootstrap + import order.** ruff allows a *bare*, inlined
+  `sys.path.insert` before imports (E402), but an intermediate assignment trips
+  it. And `import fibre` must be able to resolve independent of order — `odrive`
+  adds `../tools/odrive/pyfibre` to the path; keep the bootstrap explicit.
+- **Valid JSON.** Python `json` writes `Infinity`/`NaN` by default (invalid
+  JSON); sanitize non-finite floats to `null` at the export boundary
+  (`tools/odrive/configuration.py`).
+- **Trust the real toolchain.** The editor's LSP may report import-resolution
+  false positives when it can't see the venv's `PySide6`/`odrive`/`fibre`;
+  validate with `./check.sh` (venv) instead.
+
 ## Dependencies
 
 - **PySide6 ≥ 6.0** — Qt bindings
