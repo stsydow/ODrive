@@ -318,7 +318,7 @@ class ODriveGUI(QMainWindow):
         mode_layout.addSpacing(16)
         # Input mode: restricted to modes valid for the current control mode.
         mode_layout.addWidget(QLabel("Input Mode:"))
-        self.input_selector = InputModeSelector(self._ui_notify)
+        self.input_selector = InputModeSelector(self._log_panel_write)
         mode_layout.addWidget(self.input_selector)
         mode_layout.addStretch()
         vel_layout.addLayout(mode_layout)
@@ -368,7 +368,7 @@ class ODriveGUI(QMainWindow):
         main_layout.addWidget(self.cmd_group)
 
         # ── Control Settings (Phase 1) ───────────────────────────────
-        self.settings_tabs = SettingsTabs(self._ui_notify)
+        self.settings_tabs = SettingsTabs(self._log_panel_write)
         main_layout.addWidget(self.settings_tabs)
 
         # Note: the separate "Readings" group was removed; live estimates now
@@ -866,10 +866,11 @@ class ODriveGUI(QMainWindow):
         self.event_log.append(LogEntry(time.time(), category, message))
         logger.debug("[%s] %s", category, message)
 
-    def _ui_notify(self, msg, *_):
+    def _log_panel_write(self, msg, *_):
         """Callback for the config panels' write feedback — routed into the
-        event log (the transient status-bar messages were removed)."""
-        self.log_event("APP", msg)
+        event log (the transient status-bar messages were removed). The
+        panels pass an (unused) timeout as the second argument."""
+        self.log_event("WRITE", msg)
 
     # ── Readings update ───────────────────────────────────────────────
 
@@ -915,35 +916,46 @@ class ODriveGUI(QMainWindow):
             return
 
         self.sync_ui_from_controller()
-
-        # Keep the Control Command gating + footer state in sync each poll.
         self._update_control_enabled()
+
+        # Keep Control Command gating + footer state in sync each poll.
+        self._refresh_state_footer()
+        any_failed = self._read_voltages()
+        any_failed |= self._read_estimates()
+        self._refresh_errors()
+        self._handle_read_failures(any_failed)
+
+    def _refresh_state_footer(self):
+        """Update the axis-state label in the status footer from the device."""
         st = safe_getattr(self.axis, "current_state")
         if st is not None:
             self.state_status_label.setText(_state_display(st))
 
+    def _read_voltages(self):
+        """Read bus voltage/current and render power; return whether any read failed."""
         any_failed = False
-
         vbus, failed = self._read_value(
             "vbus_voltage",
             lambda: self.odrive.vbus_voltage,
             lambda v: self.vbus_status_label.setText(f"{v:.1f} V"))
         any_failed |= failed
-
         ibus, failed = self._read_value("ibus", lambda: self.odrive.ibus)
         any_failed |= failed
-
         if vbus is not None and ibus is not None:
             self.power_status_label.setText(f"{vbus * ibus:.1f} W")
         else:
             self.power_status_label.setText("-- W")
+        return any_failed
 
+    def _read_estimates(self):
+        """Read velocity/position estimates (wrapping position in circular
+        mode) and render them; return whether any read failed."""
+        any_failed = False
         _, failed = self._read_value(
             "vel_estimate",
             lambda: self.encoder.vel_estimate,
             lambda v: self.vel_estimate_label.setText(f"est: {v:.3f} rps"))
         any_failed |= failed
-
         pos, failed = self._read_value("pos_estimate",
                                        lambda: self.encoder.pos_estimate)
         any_failed |= failed
@@ -952,10 +964,12 @@ class ODriveGUI(QMainWindow):
             if rng is not None:
                 pos = pos % rng  # wrap into [0, range) to match circular mode
             self.pos_estimate_label.setText(f"est: {pos:.4f} rev")
+        return any_failed
 
-        # Phase 2: decode errors; keep footer + bounded event log (guarded
-        # optional reads — do not feed the disconnect counter). Log error
-        # transitions so the viewer shows context around each error.
+    def _refresh_errors(self):
+        """Decode errors, update the footer Err indicator, and log transitions
+        to the event log (guarded optional reads — not fed to the disconnect
+        counter); this gives context around each error."""
         report = read_error_report(self.odrive, self.axis)
         self._last_report = report
         key = tuple(sorted((s.name, tuple(s.errors)) for s in report.sources))
@@ -979,7 +993,9 @@ class ODriveGUI(QMainWindow):
         else:
             self.error_status_label.setText("Err: OK")
             self.error_status_label.setStyleSheet("color: green; font-weight: bold;")
-        # Fallback disconnect detection (primary is _on_lost)
+
+    def _handle_read_failures(self, any_failed):
+        """Fallback disconnect detection (primary is the `_on_lost` callback)."""
         if any_failed:
             self._read_fail_count += 1
             if self._read_fail_count == RECONNECT_FAIL_THRESHOLD:

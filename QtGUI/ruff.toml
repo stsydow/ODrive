@@ -6,5 +6,5 @@
 line-length = 120
 
 [lint]
-select = ["E", "F", "I", "UP", "B", "RUF", "BLE"]
+select = ["E", "F", "I", "UP", "B", "RUF", "BLE", "C"]
 exclude = ["../tools", "../GUI"]
