@@ -68,18 +68,20 @@ See **Annex A** for the full parameter table. Key highlights:
 
 ### Current State (GUI)
 
-A single-file PySide6 GUI (`main.py`, ~805 lines) focused on Axis 0 velocity
-control. See `ARCHITECTURE.md` for full details.
+A PySide6 GUI (`main.py` + `controls.py` + `errors.py` + `util.py`) focused on
+Axis 0 velocity control. See `ARCHITECTURE.md` for implementation details.
 
-**Capabilities now:** Auto-connect/reconnect, velocity/position/torque mode
-switching, setpoint spinboxes, Run/Stop, all axis states via dropdown + button,
-100 ms polling of basic readings, save/export/import config, reboot, clear errors,
-device info dialog (serial + hardware/firmware version), verbose logging (read
-failures go to the debug log, not a dialog).
+**Capabilities now (✅ implemented):** Auto-connect/reconnect, velocity/position/
+torque mode switching, control-tuning tabs (Electrical Limits | Mechanical Limits |
+Control Parameters, feature-gated), an input-mode selector, setpoint spinboxes,
+Run/Stop, Programm dropdown + Start, 100 ms polling, save/export/import config,
+reboot, clear errors, on-demand decoded error dialog + bounded history, device
+info dialog (serial + hardware/firmware version), verbose logging (read failures
+go to the debug log, not a dialog).
 
-**Gaps:** No calibration workflow, no control tuning (gains, limits, input mode),
-no decoded error display, no hall sensor awareness, no monitoring history/plotting,
-no analog input support, no feed-forward calibration.
+**Gaps (planned, see roadmap):** Calibration workflow (Phase 4), Config Browser
+(Phase 2.4), monitoring/plotting (Phase 3), foot-pedal analog input (Phase 5),
+hall low-speed torque drive + friction compensation (Phase 4).
 
 ---
 
@@ -87,10 +89,13 @@ no analog input support, no feed-forward calibration.
 
 ```
 QtGUI/
-├── main.py              # App entry, main window, connection, menu bar, readings
-├── calibration.py       # Calibration wizard + inertia/friction measurement tests
-├── controls.py          # Control settings: gains, limits, input mode, feed-forward
-├── errors.py           # Error decode + dialog (Phase 2)
+├── main.py              # App entry, main window, connection, menu bar, readings  ✅
+├── controls.py          # Control settings: gains, limits, input mode, feed-fwd   ✅
+├── errors.py            # Error decode + on-demand dialog (Phase 2)               ✅
+├── util.py              # Shared helpers: safe_getattr, DEVICE_EXCEPTIONS         ✅
+├── calibration.py       # Calibration wizard + inertia/friction tests (Phase 4)   ⬜ planned
+├── ruff.toml            # Lint config                                              ✅
+├── check.sh             # Lint/type-check runner                                   ✅
 ├── Plan.md              # ← this file
 └── ARCHITECTURE.md
 ```
@@ -99,11 +104,13 @@ QtGUI/
 
 ## 3. Feature Roadmap
 
-### Phase 1: Control Settings (NOW)
+### Phase 1: Control Settings ✅ DONE
 
-**Goal:** Expose tuning parameters so you can tweak and observe effects.
+**Implemented in `controls.py`**: `SettingsTabs(QTabWidget)` with three tabs
+(Electrical Limits | Mechanical Limits | Control Parameters) and an
+`InputModeSelector(QComboBox)` (moved into the Control Command section).
 
-#### 1.1 Gains & Limits Panel (`controls.py`)
+#### 1.1 Gains & Limits Panel (`controls.py`) ✅
 
 Live-editable spinboxes that read the current device value on connect:
 
@@ -118,9 +125,9 @@ Live-editable spinboxes that read the current device value on connect:
 | Velocity limit | `controller.config.vel_limit` | turn/s | Default to 70, controller error-stops if exceeded |
 | Enable torque-mode vel limit | `controller.config.enable_torque_mode_vel_limit` | bool | |
 | Gain scheduling | `controller.config.enable_gain_scheduling` | bool | |
-| Inertia (feed-forward) | `controller.config.inertia` | N·m/(turn/s²) | From dynamics test (Phase 4) |
+| Inertia (feed-forward) | `controller.config.inertia` | N·m/(turn/s²) | Write `inertia` once measured (Phase 4) |
 
-#### 1.2 Input Mode Selector
+#### 1.2 Input Mode Selector ✅
 
 Dropdown with the relevant modes. The sewing machine recommendation is **VEL_RAMP**.
 
@@ -132,16 +139,18 @@ Dropdown with the relevant modes. The sewing machine recommendation is **VEL_RAM
 | TRAP_TRAJ | 5 | Position mode (future needle positioning) |
 | TORQUE_RAMP | 6 | Smooth torque ramps |
 
-#### 1.3 Integration
+#### 1.3 Integration ✅
 
-- `controls.py` (new) provides a `SettingsTabs(QTabWidget)` (live-editable gain/limit/feed-forward spinboxes, read from device on connect) and an `InputModeSelector(QComboBox)`.
+- `controls.py` provides a `SettingsTabs(QTabWidget)` (live-editable gain/limit/feed-forward spinboxes, read from device on connect) and an `InputModeSelector(QComboBox)`.
 - Placed as a plain "Control Settings" section in the main window below the existing velocity control section (the box is *not* collapsible — it's always visible).
 
-### Phase 2: Error Display & Config Browser (NOW)
+### Phase 2: Error Display & Config Browser (PARTIALLY DONE ✅/⬜)
 
 **Goal:** Replace the raw integer error with decoded, actionable info, and add a full config tree.
 
-#### 2.1 Error Decoding (`errors.py`)
+Error display (2.1–2.3) is done; the Config Browser (2.4) is not yet implemented.
+
+#### 2.1 Error Decoding (`errors.py`) ✅
 
 Reuse `odrive.utils.dump_errors()` logic but return structured data:
 
@@ -161,29 +170,27 @@ class AxisErrors:
     sensorless: int
 ```
 
-#### 2.2 Error Panel
+#### 2.2 Error Panel ✅ (as on-demand dialog)
 
-- Each error source on its own line, color-coded (green = no error, yellow = warning, red = active error).
-- Decoded names + short description + hint.
+- Implemented as the on-demand `ErrorDialog` (opened via Device > Errors… or by clicking the `Err:` footer indicator) rather than an in-layout panel, to keep the window compact. Decoded names/values per error source, color-coded.
 - Clear Errors button.
-- Replaces the single raw integer label in the current readings area.
+- Replaces the single raw integer error label.
 
-#### 2.3 Error History
+#### 2.3 Error History ✅
 
-- Time-stamped deque (max 1000 entries), accessible via Device menu.
-- Export to text file.
+- Time-stamped deque (max 1000 entries), kept by the poll; shown in the ErrorDialog via Device menu, with export-to-file.
 
-#### 2.4 Config Browser (Read-Only)
+#### 2.4 Config Browser (Read-Only) ⬜ TODO
 
 `QDialog` + `QTreeWidget` walking the ODrive object tree recursively. Full config view without `odrivetool`. **Safety:** Recursion depth limited to prevent infinite loops on circular references. Only primitive values and sub-objects displayed (no callable traversal).
 
-#### 2.5 Integration
+#### 2.5 Integration ✅ (errors) / ⬜ (config browser)
 
-- `errors.py` (new) provides: structured error decoding (`ErrorReport`/`ErrorModule` dataclasses), an on-demand `ErrorDialog` (decoded current errors + time-stamped history, export-to-file) that replaces the raw-integer error label, and a bounded history kept by the poll.
-- `controls.py` (new) also provides the read-only Config Browser dialog (`QDialog` + `QTreeWidget`).
-- Device menu: the standalone "Dump Errors…"/"Clear Errors" become a single "Errors…" action (plus a clickable `Err:` footer field) that opens the error dialog; "Config Browser…" still to be added.
+- `errors.py` provides: structured error decoding (`ErrorReport`/`ErrorModule` dataclasses), an on-demand `ErrorDialog` (decoded current errors + time-stamped history, export-to-file) that replaces the raw-integer error label, and a bounded history kept by the poll. ✅
+- `controls.py` also provides the read-only Config Browser dialog (`QDialog` + `QTreeWidget`). ⬜ not yet implemented
+- Device menu: the standalone "Dump Errors…"/"Clear Errors" become a single "Errors…" action (plus a clickable `Err:` footer field) that opens the error dialog; "Config Browser…" still to be added. ✅ / ⬜
 
-### Phase 3: Monitoring & Plotting (NEXT)
+### Phase 3: Monitoring & Plotting (NEXT ⬜)
 
 **Goal:** Live visual feedback for tuning, plus data logging.
 
@@ -206,7 +213,7 @@ class AxisErrors:
 
 Add `pyqtgraph` to `requirements.txt` (needed here, not Phase 4).
 
-### Phase 4: Torque Drive + Calibration + Dynamics (NEXT)
+### Phase 4: Torque Drive + Calibration + Dynamics (NEXT ⬜)
 
 **Goal:** Low-speed torque drive experiment, calibration workflow, step response tuning, dynamics measurement.
 
@@ -284,7 +291,7 @@ A step change in setpoint while recording the system response. Not a dashboard f
 >
 > **Context — why `TORQUE_RAMP`/`torque_ramp_rate` does NOT substitute:** `TORQUE_RAMP` is an *input mode* that ramps `torque_setpoint_` only (`controller.cpp` `INPUT_MODE_TORQUE_RAMP`) — it never updates `vel_setpoint_`. In `VELOCITY` control the loop runs on `vel_setpoint_`, so `TORQUE_RAMP`+`VELOCITY` leaves the velocity setpoint frozen and merely injects a ramping torque offset; it cannot smooth a *velocity* command. It only makes sense paired with `TORQUE_CONTROL` mode (the low-speed torque-drive / pedal-torque path). Enum note (this firmware): `CONTROL_MODE_VELOCITY_CONTROL = 2`, `CONTROL_MODE_TORQUE_CONTROL = 1`, `INPUT_MODE_TORQUE_RAMP = 6`. `VEL_RAMP` is the velocity-mode smoothing mechanism; reserve `TORQUE_RAMP` for torque mode. The sewing baseline uses **VELOCITY (2) + VEL_RAMP (2)**.
 
-### Phase 5: Foot Pedal (FUTURE)
+### Phase 5: Foot Pedal (FUTURE ⬜)
 
 **Goal:** Replace GUI setpoint with analog foot pedal input.
 

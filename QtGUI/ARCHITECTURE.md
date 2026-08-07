@@ -27,6 +27,9 @@ QtGUI/main.py
   │                                       # opened via Device > Errors… or footer click
   ├── util.py                         # Shared helpers
   │     └── safe_getattr()                 # guarded nested getattr for device reads
+  │
+  ├── ruff.toml / check.sh            # Dev tooling: lint config + static-check runner
+  │
   ├── ODriveGUI(QMainWindow)          # Main window, owns all UI & state
   │     ├── setup_ui()                # Layout: menus, Control Command, Control Settings
   │     ├── connect_odrive()          # Background thread → odrive.find_any()
@@ -62,7 +65,7 @@ QtGUI/main.py
 │              └─ odrive.find_any()  ← blocks until device found   │
 │                   ├─ success → _on_connected(odrv)               │
 │                   │    ├─ self.odrive = odrv                     │
-│                   │    ├─ self.axis = odrv.axis0                 │
+│                   │    ├─ axis/motor/encoder/controller derived  │
 │                   │    ├─ register odrv._on_lost callback        │
 │                   │    └─ enable controls                        │
 │                   │                                              │
@@ -89,7 +92,7 @@ QtGUI/main.py
 ┌──────────────────────────────────────────────────┐
 │  File  Device ▼  Debug ▼                          │  ← menu bar
 ├──────────────────────────────────────────────────┤
-│  [▶ Run (Closed Loop)]  [■ Stop (Idle)]  State: [AXIS_STATE_IDLE ▾]  [Execute State] │
+│  [▶ Run (Closed Loop)]  [■ Stop (Idle)]  Programm: [AXIS_STATE_IDLE ▾]  [Start] │
 ├──────────────────────────────────────────────────┤
 │  Control Command  (setpoints, enabled only in closed-loop) │
 │  Control Mode: [Velocity Control ▾]               │
@@ -123,7 +126,7 @@ QtGUI/main.py
 | **Device section → menu bar** | Save/Export/Import/Reboot moved from a group box to a **Device** menu on the menu bar. This declutters the main area and follows standard desktop GUI conventions. The menu is disabled until connected, just like the control widgets. |
 | **Connection status in the status bar footer** | The connection status is a permanent composed widget on the `QStatusBar` (connection indicator, error, bus voltage, power draw — Plan.md §4.7) instead of a dedicated group box. This keeps the main area focused on control and monitoring, while the footer always shows live state. Temporary action messages (save, export, etc.) appear via `showMessage()` on the left without duplicating the connection text. |
 | **Persistent status bar messages** | `showMessage(text, 0)` is used for connection progress ("Finding ODrive...", "Connected!") so they don't disappear after the default 3 s timeout. Action messages (save, export) still use the default transient timeout. |
-| **Debug menu** | A Debug menu provides verbose logging toggle, force reconnect, and device info — useful for diagnosing connection issues without restarting the GUI. |
+| **Debug menu** | A Debug menu provides a verbose logging toggle and force reconnect — useful for diagnosing connection issues without restarting the GUI. (Device Info lives in the **Device** menu.) |
 | **No connect/disconnect button** | Auto-connect on startup + auto-reconnect on loss makes a manual button redundant. The status bar shows the current state. |
 | **UI never stops the motor (monitor-only)** | Per the general project rule, closing the window or reconnecting must not command the device. `closeEvent()` only stops the poll timer; reconnect only tears down GUI references. The motor is commanded **exclusively** via the explicit Run / Stop / Execute-State actions. |
 | **Ctrl+C via `SIG_DFL`** | The Qt event loop is a blocking C++ call, so a Python `KeyboardInterrupt` is not serviced during `app.exec()` (a timer "nudge" is unreliable). Restoring the default SIGINT action (`signal.signal(SIGINT, SIG_DFL)`) makes Ctrl+C terminate the process at the OS level, reliably from any state (including while "finding device"). Safe because the GUI is monitor-only. |
@@ -158,7 +161,7 @@ odrv._on_lost.add_done_callback()
 ## Adding a New Feature
 
 1. **New control widget**: Add it to `setup_ui()` in the appropriate group box. Wire signals to a slot.
-2. **New ODrive method call**: Call it on `self.odrive` (or `self.axis`/`self.controller`/`self.motor`/`self.encoder`). Wrap in `try/except` — the serial connection may drop.
+2. **New ODrive method call**: Call it on `self.odrive` (or a derived property like `self.axis`/`self.controller`). Wrap in `try/except DEVICE_EXCEPTIONS` — the serial connection may drop; leave genuinely unknown errors uncaught so they surface with a stack trace.
 3. **New reconnect trigger**: The `_on_device_lost` callback handles most cases. If your feature causes the device to disconnect (e.g., reboot), `_on_lost` will fire and auto-reconnect will re-establish the connection.
 4. **New reading**: Add a label + update code in `update_readings()`.
 
