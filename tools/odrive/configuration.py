@@ -1,5 +1,6 @@
 
 import json
+import math
 import os
 import tempfile
 import fibre.libfibre
@@ -57,6 +58,19 @@ def get_temp_config_filename(device):
     safe_serial_number = ''.join(filter(str.isalnum, serial_number))
     return os.path.join(tempfile.gettempdir(), 'odrive-config-{}.json'.format(safe_serial_number))
 
+def _sanitize_for_json(obj):
+    """Recursively replace non-finite floats (inf/-inf/nan) with None so the
+    exported file is valid JSON — Python's json dumps these as the non-standard
+    ``Infinity``/``NaN`` literals by default, which other parsers reject."""
+    if isinstance(obj, float):
+        return None if not math.isfinite(obj) else obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
+
+
 def backup_config(device, filename, logger):
     """
     Exports the configuration of an ODrive to a JSON file.
@@ -75,7 +89,7 @@ def backup_config(device, filename, logger):
 
     data = get_dict(device, device, False)
     with open(filename, 'w') as file:
-        json.dump(data, file)
+        json.dump(_sanitize_for_json(data), file)
     logger.info("Configuration saved.")
 
 def restore_config(device, filename, logger):
