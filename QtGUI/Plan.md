@@ -183,7 +183,9 @@ class AxisErrors:
   device events: connect/disconnect, axis-state transitions, control-mode
   changes, setpoint applies, config actions, and error transitions (new errors + clears).
   The entries leading up to an error thus show context of what happened before.
-- Shown in `LogDialog` via **Debug > Event Log…**, with export-to-file.
+- Shown in `LogDialog` via **Debug > Event Log…**, with export-to-file. Non-modal
+  and live-updating: a single shared instance stays open beside the main window
+  and refreshes itself by observing appended entries (via the `log_updated` Qt signal).
 - The viewer works even while disconnected, so the run-up to a disconnect is visible.
 
 #### 2.4 Config Browser (Read-Only) ⬜ TODO
@@ -193,7 +195,7 @@ class AxisErrors:
 #### 2.5 Integration ✅ (errors) / ⬜ (config browser)
 
 - `errors.py` provides: structured error decoding (`ErrorReport`/`ErrorModule` dataclasses) and the `ErrorDialog` (current decoded errors + clear) that replaces the raw-integer error label. ✅
-- `eventlog.py` provides the time-stamped event log (`LogEntry`/`format_log`) and `LogDialog` (Debug > Event Log…, offline-capable, export). ✅
+- `eventlog.py` provides the time-stamped event log (`LogEntry`/`format_log`) and `LogDialog` (Debug > Event Log…, offline-capable, non-modal + live via an observation signal, export). ✅
 - `controls.py` also provides the read-only Config Browser dialog (`QDialog` + `QTreeWidget`). ⬜ not yet implemented
 - Device menu: the standalone "Dump Errors…"/"Clear Errors" become a single "Errors…" action (plus a clickable `Err:` footer field) that opens the error dialog; "Config Browser…" still to be added. ✅ / ⬜
 

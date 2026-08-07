@@ -134,6 +134,10 @@ class _ClickableLabel(QLabel):
 class ODriveGUI(QMainWindow):
     """Main ODrive GUI window - Axis 0 velocity control focused."""
 
+    # Emitted after a new LogEntry is appended; the live event-log dialog
+    # subscribes to observe additions (rather than polling).
+    log_updated = Signal()
+
     def __init__(self, verbose=False):
         super().__init__()
         # Single source of truth: the connected ODrive root. axis/motor/
@@ -149,6 +153,7 @@ class ODriveGUI(QMainWindow):
         self._last_report = None
         self._last_error_key = None
         self.event_log = deque(maxlen=1000)
+        self._log_dialog = None
         self._verbose = verbose
 
         self.update_timer = QTimer()
@@ -832,10 +837,16 @@ class ODriveGUI(QMainWindow):
 
     @Slot()
     def _on_show_event_log(self):
-        """Open the event-log viewer from the Debug menu. Always available —
-        works even while disconnected so the run-up to a disconnect is visible."""
-        dlg = LogDialog(self.event_log, parent=self)
-        dlg.exec()
+        """Open the event-log viewer from the Debug menu. Non-modal and live: a
+        single shared instance stays open beside the main window and updates as
+        new events arrive. Works even while disconnected so the run-up to a
+        disconnect is visible."""
+        if self._log_dialog is None:
+            self._log_dialog = LogDialog(self.event_log, updated=self.log_updated,
+                                         parent=self)
+        self._log_dialog.show()
+        self._log_dialog.raise_()
+        self._log_dialog.activateWindow()
 
     def _on_show_error_history(self):
         """Open the current-errors dialog (Device > Errors… or the footer Err
@@ -864,6 +875,7 @@ class ODriveGUI(QMainWindow):
         viewer) and mirror it to the debug log. Categories: CONNECT/STATE/
         MODE/SETPOINT/CFG/ERROR/CLEAR."""
         self.event_log.append(LogEntry(time.time(), category, message))
+        self.log_updated.emit()
         logger.debug("[%s] %s", category, message)
 
     def _log_panel_write(self, msg, *_):

@@ -50,28 +50,44 @@ def format_log(entries):
 class LogDialog(QDialog):
     """Chronological UI/device event log (Debug > Event Log…).
 
-    Works even while disconnected, so the run-up to a disconnect is visible."""
+    Non-modal and live-updating: it stays open beside the main window and
+    refreshes itself by observing newly appended entries (via the `updated`
+    Qt signal — no polling)."""
 
-    def __init__(self, entries, parent=None):
+    def __init__(self, entries, updated=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Event Log")
         self.resize(640, 480)
+        self._entries = entries          # live reference to the shared deque
 
         outer = QVBoxLayout(self)
         self.text = QPlainTextEdit()
         self.text.setReadOnly(True)
-        self.text.setPlainText(format_log(entries))
         outer.addWidget(self.text)
 
         row = QHBoxLayout()
         export_btn = QPushButton("Export Log…")
         export_btn.clicked.connect(self._export)
         close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
+        close_btn.clicked.connect(self.close)
         row.addWidget(export_btn)
         row.addStretch()
         row.addWidget(close_btn)
         outer.addLayout(row)
+
+        self._refresh()
+        if updated is not None:
+            updated.connect(self._refresh)
+
+    @Slot()
+    def _refresh(self):
+        text = format_log(self._entries)
+        if text == self.text.toPlainText():
+            return
+        self.text.setPlainText(text)
+        # Keep the live view pinned to the newest entry.
+        sb = self.text.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
     @Slot()
     def _export(self):
