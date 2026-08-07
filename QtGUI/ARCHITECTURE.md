@@ -21,7 +21,7 @@ QtGUI/main.py
   ├── controls.py                     # Phase 1: Control Settings
   │     ├── SettingsTabs(QTabWidget)       # Electrical | Mechanical | Control Params
   │     └── InputModeSelector(QComboBox)
-  ├── monitoring.py                   # Phase 2: Error decode + on-demand dialog
+  ├── errors.py                       # Phase 2: Error decode + on-demand dialog
   │     ├── read_error_report(odrv, axis)  # structured decode (system/axis/motor/enc/ctl...)
   │     └── ErrorDialog(QDialog)           # current errors + history, clear/export
   │                                       # opened via Device > Errors… or footer click
@@ -208,7 +208,7 @@ it assumes `ruff` and `mypy` are already on PATH):
 
 - `ruff check .` — lint (uses `ruff.toml`; selects `E/F/I/UP/B/RUF/BLE` at a
   120-char line length for the tabular config tables).
-- `mypy` on `main.py` / `controls.py` / `monitoring.py` / `util.py` — static typing.
+- `mypy` on `main.py` / `controls.py` / `errors.py` / `util.py` — static typing.
 - `python -m py_compile` — syntax sanity.
 
 Optional formatting (not gated by `check.sh` — normalizes most of the codebase,

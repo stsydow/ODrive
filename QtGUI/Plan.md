@@ -90,7 +90,7 @@ QtGUI/
 ├── main.py              # App entry, main window, connection, menu bar, readings
 ├── calibration.py       # Calibration wizard + inertia/friction measurement tests
 ├── controls.py          # Control settings: gains, limits, input mode, feed-forward
-├── monitoring.py        # Error display, live plotting, data logging
+├── errors.py           # Error decode + dialog (Phase 2)
 ├── Plan.md              # ← this file
 └── ARCHITECTURE.md
 ```
@@ -141,7 +141,7 @@ Dropdown with the relevant modes. The sewing machine recommendation is **VEL_RAM
 
 **Goal:** Replace the raw integer error with decoded, actionable info, and add a full config tree.
 
-#### 2.1 Error Decoding (`monitoring.py`)
+#### 2.1 Error Decoding (`errors.py`)
 
 Reuse `odrive.utils.dump_errors()` logic but return structured data:
 
@@ -179,7 +179,7 @@ class AxisErrors:
 
 #### 2.5 Integration
 
-- `monitoring.py` (new) provides: structured error decoding (`ErrorReport`/`ErrorModule` dataclasses), an on-demand `ErrorDialog` (decoded current errors + time-stamped history, export-to-file) that replaces the raw-integer error label, and a bounded history kept by the poll.
+- `errors.py` (new) provides: structured error decoding (`ErrorReport`/`ErrorModule` dataclasses), an on-demand `ErrorDialog` (decoded current errors + time-stamped history, export-to-file) that replaces the raw-integer error label, and a bounded history kept by the poll.
 - `controls.py` (new) also provides the read-only Config Browser dialog (`QDialog` + `QTreeWidget`).
 - Device menu: the standalone "Dump Errors…"/"Clear Errors" become a single "Errors…" action (plus a clickable `Err:` footer field) that opens the error dialog; "Config Browser…" still to be added.
 
@@ -493,12 +493,12 @@ corresponds to `pole_pairs = 8` in the working device config.
 | 2025-08 | Setpoints now require explicit confirmation: velocity/torque/position spinboxes no longer write on change — the active setpoint is sent only via the "Apply Setpoint" button or the Enter key. Added to the Design Principles (adjusting a field never commands the motor). |
 | 2025-08 | Replaced the single status label (which duplicated connection text) with a composed status footer (Plan.md §4.7): connection indicator ● Online/Offline/Connecting, Err: OK/err, bus voltage (V), and power draw (W = VBus × Ibus). Refreshed by the 100 ms poll; transient action messages stay separate. |
 | 2025-08 | Calibration finalize: after calibration + a functional test, set `encoder.config.pre_calibrated = true` (and motor `pre_calibrated` when applicable) then save. Saving rule added to Design Principles: any `save_configuration` is an explicit, user-confirmed action that puts the device into IDLE first. |
-| 2025-08 | Optional/"maybe-none" value access: added a shared `safe_getattr(obj, *attrs, default=None)` helper (guarded nested getattr for device reads; handles missing attributes and raised reads) and a general rule (Plan.md §4.1) — no scattered `try/except: pass`; optional reads default to None, while disconnect-distinguishing reads (`_read_value`/`_read_failed`) and writes keep explicit targeted try/except. Replaced `maybe_read(fn, default)` and the scattered attribute-read blocks across `main.py`, `controls.py`, `monitoring.py` with it. |
+| 2025-08 | Optional/"maybe-none" value access: added a shared `safe_getattr(obj, *attrs, default=None)` helper (guarded nested getattr for device reads; handles missing attributes and raised reads) and a general rule (Plan.md §4.1) — no scattered `try/except: pass`; optional reads default to None, while disconnect-distinguishing reads (`_read_value`/`_read_failed`) and writes keep explicit targeted try/except. Replaced `maybe_read(fn, default)` and the scattered attribute-read blocks across `main.py`, `controls.py`, `errors.py` with it. |
 | 2025-08 | Collapsed device state: the four stored references `axis`/`motor`/`encoder`/`controller` are gone; `self.odrive` is the single source of truth and the others are derived `safe_getattr`-backed read-only properties, so they can never go stale or drift out of sync. `connect_odrive`/`_on_connected` no longer hand-manage the object graph. |
 | 2025-08 | Removed the collapsible "Control Settings" group-box wrapper: the `SettingsTabs` panel is added directly to the main layout (no checkable box / toggle slot / intermediate layout), and the `_on_controls_collapsed` handler was deleted. |
 | 2025-08 | Device Info dialog now also shows the hardware version (`hw_version_major`/`minor`/`variant`, formatted `vX.Y` with an optional `-NV` suffix) read via `safe_getattr`. Removed the "Dump Read Failures" dialog/menu action — read failures already go to the debug log (`_read_failed` logs once per distinct error; `update_readings` logs the fallback reconnect counter), so the popup was redundant. |
 | 2025-08 | Fix: on switching to closed-loop (and on connect), the active setpoint display now reads the device's current input setpoint (new `_sync_setpoint_from_device()` per control mode) instead of a stale/reset local value; removed the zeroing of the velocity spinbox on Stop. |
-| 2025-08 | Phase 2 (error display) implemented: new `monitoring.py` with `read_error_report()` (structured decode of system/axis/motor/encoder/controller/sensorless), a live color-coded `ErrorPanel` with a bounded (1000) history and a history dialog (export to file). Replaced the raw error label and the Device menu's "Dump Errors"/"Clear Errors" with the decoded panel + a single "Errors…" history action. Fixed a source-base bug (axis module was reading odrv.error). Config Browser still pending (next). |
+| 2025-08 | Phase 2 (error display) implemented: new `errors.py` (renamed from `monitoring.py`) with `read_error_report()` (structured decode of system/axis/motor/encoder/controller/sensorless), a live color-coded `ErrorPanel` with a bounded (1000) history and a history dialog (export to file). Replaced the raw error label and the Device menu's "Dump Errors"/"Clear Errors" with the decoded panel + a single "Errors…" history action. Fixed a source-base bug (axis module was reading odrv.error). Config Browser still pending (next). |
 | 2025-08 | Phase 2 (error display): moved the decoded-error view out of the layout (window was too tall) into an on-demand `ErrorDialog` — opened via Device > Errors… or by clicking the `Err:` footer indicator (now a `_ClickableLabel`). The poll keeps decoding into a bounded history; dialog shows current errors + history with clear/export. |
 | 2025-08 | Removed the "Readings" section; velocity & position estimates now live beside their setpoints in the "Control Command" area (compact `est:` labels). Bus voltage / power remain in the status footer. |
 | 2025-08 | Control Command rows are now mutually exclusive by control mode: the velocity setpoint row (incl. its estimate) is hidden unless in velocity mode, matching torque/position rows. |

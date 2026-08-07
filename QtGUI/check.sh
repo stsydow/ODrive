@@ -16,12 +16,12 @@ fail=0
 echo "==> ruff check ."
 ruff check . || fail=1
 
-echo "==> mypy (main, controls, monitoring, util)"
+echo "==> mypy (main, controls, errors, util)"
 mypy --no-incremental --ignore-missing-imports \
-     main.py controls.py monitoring.py util.py || fail=1
+     main.py controls.py errors.py util.py || fail=1
 
 echo "==> python -m py_compile (all modules)"
-python3 -m py_compile main.py controls.py monitoring.py util.py || fail=1
+python3 -m py_compile main.py controls.py errors.py util.py || fail=1
 
 if [ "$fail" -ne 0 ]; then
     echo "==> FAILED"

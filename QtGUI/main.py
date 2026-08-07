@@ -55,7 +55,7 @@ from odrive.enums import (
 from controls import InputModeSelector, SettingsTabs
 
 # Phase 2: Error display & history (Plan.md §2)
-from monitoring import ErrorDialog, read_error_report
+from errors import ErrorDialog, read_error_report
 from util import DEVICE_EXCEPTIONS, safe_getattr
 
 logger = logging.getLogger(__name__)
