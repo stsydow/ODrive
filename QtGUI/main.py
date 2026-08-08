@@ -140,9 +140,9 @@ class ODriveGUI(QMainWindow):
 
     def __init__(self, verbose=False):
         super().__init__()
-        # Single source of truth: the connected ODrive root. axis/motor/
-        # encoder/controller are derived properties (see below) so they can
-        # never drift out of sync with the device or be left stale.
+        # Single source of truth: the connected ODrive root. Everything else
+        # (axis0/motor/encoder/controller) is reached through `self.odrive` at
+        # each point of use — never cached, so it can't go stale on disconnect.
         self.odrive = None
 
         self._connecting = False
@@ -167,25 +167,11 @@ class ODriveGUI(QMainWindow):
         QTimer.singleShot(500, self.connect_odrive)
 
     # ── Device access ────────────────────────────────────────────────
-    # axis0/motor/encoder/controller are always derived from `self.odrive`
-    # (safe_getattr returns None if the device or a sub-object is missing, so
-    # these never raise and never go stale).
-
-    @property
-    def axis(self):
-        return safe_getattr(self.odrive, "axis0")
-
-    @property
-    def motor(self):
-        return safe_getattr(self.odrive, "axis0", "motor")
-
-    @property
-    def encoder(self):
-        return safe_getattr(self.odrive, "axis0", "encoder")
-
-    @property
-    def controller(self):
-        return safe_getattr(self.odrive, "axis0", "controller")
+    # No cached sub-object refs (axis0/motor/encoder/controller). The ODrive
+    # tree below axis0 is fully populated whenever connected, so `safe_getattr`
+    # is only used to reach/guard axis0 itself; the rest is plain attribute
+    # access. Sub-objects are derived per use (or passed transiently), never
+    # stored — a stale ref can't survive a disconnect.
 
     def setup_ui(self):
         """Set up the main window UI."""
@@ -401,8 +387,8 @@ class ODriveGUI(QMainWindow):
         logger.debug("connect_odrive: called (odrive=%s)",
                      self.odrive is not None)
 
-        # Drop any stale device reference. axis/motor/encoder/controller are
-        # derived from `self.odrive`, so there is nothing else to clear.
+        # Drop any stale device reference. Everything is derived from
+        # `self.odrive`, so there is nothing else to clear.
         if self.odrive is not None:
             self.odrive = None
             logger.debug("connect_odrive: stale device reference cleared")
@@ -444,8 +430,7 @@ class ODriveGUI(QMainWindow):
         self.odrive = odrv
         self._connecting = False
         self._read_fail_count = 0
-        logger.debug("on_connected: axis0 wired (motor=%s, encoder=%s, controller=%s)",
-                     self.motor is not None, self.encoder is not None, self.controller is not None)
+        logger.debug("on_connected: axis0 wired")
 
         # The odrive library notifies us when this device disconnects
         # (its background discovery thread keeps running).
@@ -460,9 +445,11 @@ class ODriveGUI(QMainWindow):
         except DEVICE_EXCEPTIONS as e:
             logger.warning("on_connected: _on_lost registration failed: %s", e)
 
-        # Phase 1 control settings: load current device values + feature gate
-        self.input_selector.bind(self.controller)
-        self.settings_tabs.bind(self.controller, self.motor, self.odrive)
+        # Phase 1 control settings: load current device values + feature gate.
+        # Panels hold only the device root and derive sub-objects per use, so
+        # nothing they keep can go stale across a disconnect.
+        self.input_selector.bind(self.odrive)
+        self.settings_tabs.bind(self.odrive)
         # Show the device's actual setpoint on connect.
         self._sync_setpoint_from_device()
 
@@ -511,9 +498,9 @@ class ODriveGUI(QMainWindow):
         running (a disabled parent would otherwise force-disable the combo).
         """
         running = False
-        if self._connected and self.axis is not None:
-            running = (safe_getattr(self.axis, "current_state")
-                       == AXIS_STATE_CLOSED_LOOP_CONTROL)
+        if self._connected:
+            axis = safe_getattr(self.odrive, "axis0")  # only guarded level
+            running = axis is not None and axis.current_state == AXIS_STATE_CLOSED_LOOP_CONTROL
         cmd_ok = self._connected and running
         self.cmd_group.setEnabled(self._connected)
         self.vel_spinbox.setEnabled(cmd_ok)
@@ -528,9 +515,10 @@ class ODriveGUI(QMainWindow):
 
         Only reads the device when the mode may have changed, to keep USB traffic low.
         """
-        if self.controller is None:
+        axis = safe_getattr(self.odrive, "axis0")  # only guarded level
+        if axis is None:
             return
-        actual_mode = safe_getattr(self.controller, "config", "control_mode")
+        actual_mode = axis.controller.config.control_mode
         if actual_mode is None:
             return
 
@@ -554,16 +542,16 @@ class ODriveGUI(QMainWindow):
 
     def _current_control_mode(self):
         """Return the current control mode, or None if controller is unavailable."""
-        if self.controller is None:
-            return None
-        return safe_getattr(self.controller, "config", "control_mode")
+        axis = safe_getattr(self.odrive, "axis0")  # only guarded level
+        return None if axis is None else axis.controller.config.control_mode
 
     @Slot()
     def on_run_clicked(self):
         """Enter closed-loop control."""
-        if self.axis is None:
+        axis = safe_getattr(self.odrive, "axis0")
+        if axis is None:
             return
-        self.axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+        axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
         # Show the device's actual setpoint, not a stale/reset local value.
         self._sync_setpoint_from_device()
         self.log_event("STATE", "Run: Closed Loop")
@@ -571,29 +559,32 @@ class ODriveGUI(QMainWindow):
     @Slot()
     def on_stop_clicked(self):
         """Go to idle."""
-        if self.axis is None:
+        axis = safe_getattr(self.odrive, "axis0")
+        if axis is None:
             return
-        self.axis.requested_state = AXIS_STATE_IDLE
+        axis.requested_state = AXIS_STATE_IDLE
         self.log_event("STATE", "Stop: Idle")
 
     @Slot(str)
     def on_mode_changed(self, mode):
         """Request a switch to the selected control mode."""
-        if self.controller is None:
+        axis = safe_getattr(self.odrive, "axis0")  # only guarded level
+        if axis is None:
             return
+        controller = axis.controller
         new_mode = MODE_VALUES.get(mode)
         if new_mode is None:
             return
-        if safe_getattr(self.controller, "config", "control_mode") == new_mode:
+        if controller.config.control_mode == new_mode:
             return
         try:
-            self.controller.config.control_mode = new_mode
+            controller.config.control_mode = new_mode
             if new_mode == CONTROL_MODE_VELOCITY_CONTROL:
-                self.controller.input_vel = self.vel_spinbox.value()
+                controller.input_vel = self.vel_spinbox.value()
             elif new_mode == CONTROL_MODE_POSITION_CONTROL:
-                self.controller.input_pos = self.pos_spinbox.value()
+                controller.input_pos = self.pos_spinbox.value()
             elif new_mode == CONTROL_MODE_TORQUE_CONTROL:
-                self.controller.input_torque = self.torque_spinbox.value()
+                controller.input_torque = self.torque_spinbox.value()
             # Update the visible setpoint row immediately (not only at the
             # next 100ms poll).
             self.sync_ui_from_controller()
@@ -606,23 +597,25 @@ class ODriveGUI(QMainWindow):
         """Populate the active setpoint spinbox from the device's current
         input setpoint (device truth). Called on connect and when entering
         closed-loop so the display isn't a stale/reset local value."""
-        if self.controller is None:
+        axis = safe_getattr(self.odrive, "axis0")  # only guarded level
+        if axis is None:
             return
+        controller = axis.controller
         mode = self._current_control_mode()
         if mode == CONTROL_MODE_VELOCITY_CONTROL:
-            v = safe_getattr(self.controller, "input_vel")
+            v = controller.input_vel
             if v is not None:
                 self.vel_spinbox.blockSignals(True)
                 self.vel_spinbox.setValue(float(v))
                 self.vel_spinbox.blockSignals(False)
         elif mode == CONTROL_MODE_TORQUE_CONTROL:
-            t = safe_getattr(self.controller, "input_torque")
+            t = controller.input_torque
             if t is not None:
                 self.torque_spinbox.blockSignals(True)
                 self.torque_spinbox.setValue(float(t))
                 self.torque_spinbox.blockSignals(False)
         elif mode == CONTROL_MODE_POSITION_CONTROL:
-            p = safe_getattr(self.controller, "input_pos")
+            p = controller.input_pos
             if p is not None:
                 self.pos_spinbox.blockSignals(True)
                 self.pos_spinbox.setValue(float(p))
@@ -632,10 +625,12 @@ class ODriveGUI(QMainWindow):
         """Return the circular setpoint range when circular position mode is
         active, else None. Used to wrap the displayed estimate into
         [0, range) so it matches the device's circular setpoint behaviour."""
-        if self.controller is None:
+        axis = safe_getattr(self.odrive, "axis0")  # only guarded level
+        if axis is None:
             return None
-        if safe_getattr(self.controller, "config", "circular_setpoints"):
-            rng = safe_getattr(self.controller, "config", "circular_setpoint_range")
+        controller = axis.controller
+        if controller.config.circular_setpoints:
+            rng = controller.config.circular_setpoint_range
             if rng and float(rng) > 0:
                 return float(rng)
         return None
@@ -671,18 +666,20 @@ class ODriveGUI(QMainWindow):
         moves the motor (monitor-only principle). The value is sent only when
         the user confirms via the Apply button or by pressing Enter.
         """
-        if self.controller is None:
+        axis = safe_getattr(self.odrive, "axis0")  # only guarded level
+        if axis is None:
             return
+        controller = axis.controller
         mode = self._current_control_mode()
         try:
             if mode == CONTROL_MODE_VELOCITY_CONTROL:
-                self.controller.input_vel = self.vel_spinbox.value()
+                controller.input_vel = self.vel_spinbox.value()
                 self.log_event("SETPOINT", f"Velocity setpoint -> {self.vel_spinbox.value()}")
             elif mode == CONTROL_MODE_TORQUE_CONTROL:
-                self.controller.input_torque = self.torque_spinbox.value()
+                controller.input_torque = self.torque_spinbox.value()
                 self.log_event("SETPOINT", f"Torque setpoint -> {self.torque_spinbox.value()}")
             elif mode == CONTROL_MODE_POSITION_CONTROL:
-                self.controller.input_pos = self.pos_spinbox.value()
+                controller.input_pos = self.pos_spinbox.value()
                 self.log_event("SETPOINT", f"Position setpoint -> {self.pos_spinbox.value()}")
             else:
                 return
@@ -692,11 +689,12 @@ class ODriveGUI(QMainWindow):
     @Slot(str)
     def on_state_changed(self, state_str):
         """Execute a state selected in the dropdown (triggered by Execute State)."""
-        if self.axis is None:
+        axis = safe_getattr(self.odrive, "axis0")
+        if axis is None:
             return
         state = STATE_MAP.get(state_str)
         if state is not None:
-            self.axis.requested_state = state
+            axis.requested_state = state
             self.log_event("STATE", f"Start: {state_str}")
         else:
             logger.warning("Unknown axis state requested: %s", state_str)
@@ -849,7 +847,7 @@ class ODriveGUI(QMainWindow):
             QMessageBox.information(self, "Errors", "Not connected")
             return
         if self._last_report is None:
-            self._last_report = read_error_report(self.odrive, self.axis)
+            self._last_report = read_error_report(self.odrive, safe_getattr(self.odrive, "axis0"))
         dlg = ErrorDialog(self._last_report,
                           clear_fn=self._clear_errors, parent=self)
         dlg.exec()
@@ -917,7 +915,7 @@ class ODriveGUI(QMainWindow):
     def update_readings(self):
         """Update displayed values from the ODrive. If reads fail repeatedly
         (and no _on_lost notification arrived), trigger a reconnect."""
-        if self.axis is None or self.odrive is None:
+        if self.odrive is None:
             return
 
         self.sync_ui_from_controller()
@@ -932,7 +930,8 @@ class ODriveGUI(QMainWindow):
 
     def _refresh_state_footer(self):
         """Update the axis-state label in the status footer from the device."""
-        st = safe_getattr(self.axis, "current_state")
+        axis = safe_getattr(self.odrive, "axis0")  # only guarded level
+        st = axis.current_state if axis is not None else None
         if st is not None:
             self.state_status_label.setText(_state_display(st))
 
@@ -958,11 +957,11 @@ class ODriveGUI(QMainWindow):
         any_failed = False
         _, failed = self._read_value(
             "vel_estimate",
-            lambda: self.encoder.vel_estimate,
+            lambda: self.odrive.axis0.encoder.vel_estimate,
             lambda v: self.vel_estimate_label.setText(f"est: {v:.3f} rps"))
         any_failed |= failed
         pos, failed = self._read_value("pos_estimate",
-                                       lambda: self.encoder.pos_estimate)
+                                       lambda: self.odrive.axis0.encoder.pos_estimate)
         any_failed |= failed
         if pos is not None:
             rng = self._position_circular_range()
@@ -975,7 +974,7 @@ class ODriveGUI(QMainWindow):
         """Decode errors, update the footer Err indicator, and log transitions
         to the event log (guarded optional reads — not fed to the disconnect
         counter); this gives context around each error."""
-        report = read_error_report(self.odrive, self.axis)
+        report = read_error_report(self.odrive, safe_getattr(self.odrive, "axis0"))
         self._last_report = report
         key = tuple(sorted((s.name, tuple(s.errors)) for s in report.sources))
         if key and key != self._last_error_key:

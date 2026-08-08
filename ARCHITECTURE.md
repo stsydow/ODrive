@@ -71,6 +71,7 @@ Firmware (ODrive → Axis → Motor)
 
 - **Fibre over custom protocol**: Unified RPC framework handles attribute access, method invocation, and event notification across all backends (USB, UART, CAN, I2C).
 - **Interface-driven code generation**: `odrive-interface.yaml` is the single source of truth for the public API. C++ and Python bindings are generated, avoiding drift.
+- **QtGUI never keeps device sub-objects (QtGUI/)**. The connected root is stored as `self.odrive`; `axis0`/`motor`/`encoder`/`controller` are derived per use and never cached, so a stale reference can't outlive a disconnect. `safe_getattr` is used only to reach/guard `axis0` — the one level absent on an empty/disconnected object — because once connected the tree below `axis0` is fully populated and read with plain attribute access. Disconnect detection relies on `_on_lost` plus reads that surface `ObjectLostError` (via `_read_value`) into the reconnect counter.
 - **Component hierarchy**: Motor control components are organized in a tree with priority-based scheduling, enabling modular extension of the control loop.
 - **FreeRTOS**: Preemptive multitasking with separate tasks for USB IRQ, UART, CAN, and the main control loop.
 

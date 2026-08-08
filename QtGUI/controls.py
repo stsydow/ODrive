@@ -88,7 +88,7 @@ class InputModeSelector(QComboBox):
     def __init__(self, status=None, parent=None):
         super().__init__(parent)
         self._status = status
-        self._controller = None
+        self._odrive = None  # device root only; sub-objects derived per use
         self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.setToolTip(
             "How the axis setpoint is derived from the input, for the current "
@@ -102,9 +102,15 @@ class InputModeSelector(QComboBox):
     def input_mode(self):
         return self.currentData()
 
-    def bind(self, controller):
-        """Attach a controller, enable the box and populate for its mode."""
-        self._controller = controller
+    def _controller(self):
+        """Transient controller ref derived from the device root each call."""
+        axis = safe_getattr(self._odrive, "axis0")  # only guarded level
+        return axis.controller if axis is not None else None
+
+    def bind(self, odrive):
+        """Attach the device root, enable the box and populate for its mode."""
+        self._odrive = odrive
+        controller = self._controller()
         if controller is None or not hasattr(controller.config, "input_mode"):
             self.clear()
             self.setEnabled(False)
@@ -114,16 +120,18 @@ class InputModeSelector(QComboBox):
 
     def set_control_mode(self, control_mode):
         """Repopulate for a (possibly new) control mode."""
-        if self._controller is None:
+        if self._controller() is None:
             return
         self._apply_for_mode(control_mode)
 
     def _read_mode(self):
-        return safe_getattr(self._controller, "config", "control_mode")
+        controller = self._controller()
+        return None if controller is None else controller.config.control_mode
 
     def _apply_for_mode(self, control_mode):
+        controller = self._controller()
         allowed = self.MODES_BY_CONTROL.get(control_mode, [INPUT_MODE_PASSTHROUGH])
-        cur = safe_getattr(self._controller, "config", "input_mode")
+        cur = controller.config.input_mode
         if cur is not None and cur in allowed and cur != INPUT_MODE_PASSTHROUGH:
             select = cur
         else:
@@ -134,7 +142,7 @@ class InputModeSelector(QComboBox):
         # Device had an input mode inapplicable to this control mode: correct it.
         if cur is not None and select != cur:
             try:
-                self._controller.config.input_mode = select
+                controller.config.input_mode = select
             except DEVICE_EXCEPTIONS as e:
                 logger.warning("failed to set input_mode: %s", e)
 
@@ -156,13 +164,14 @@ class InputModeSelector(QComboBox):
 
     @Slot()
     def _on_changed(self):
-        if self._controller is None:
+        controller = self._controller()
+        if controller is None:
             return
         value = self.currentData()
         if value is None:
             return
         try:
-            self._controller.config.input_mode = value
+            controller.config.input_mode = value
             if self._status:
                 self._status(f"Input mode set to {self.currentText()}")
         except DEVICE_EXCEPTIONS as e:
@@ -182,9 +191,7 @@ class _RowConfigPanel(QGroupBox):
     def __init__(self, title, status=None, parent=None):
         super().__init__(title, parent)
         self._status = status
-        self._controller = None
-        self._motor = None
-        self._odrive = None
+        self._odrive = None  # device root only; sub-objects derived per use
         self._syncing = False
         self._spin_boxes = {}
         self._check_boxes = {}
@@ -265,24 +272,22 @@ class _RowConfigPanel(QGroupBox):
 
     # -- device sync / writes -----------------------------------------
 
-    def bind(self, controller, motor, odrive):
-        """Attach device refs and (re)load values + feature availability."""
-        self._controller = controller
-        self._motor = motor
+    def bind(self, odrive):
+        """Attach the device root and (re)load values + feature availability."""
         self._odrive = odrive
-        if controller is None:
+        if safe_getattr(odrive, "axis0", "controller") is None:
             self.setEnabled(False)
             return
         self.setEnabled(True)
         self._sync_from_device()
 
     def _obj(self, attr):
+        """Transiently resolve the subtree object a config row lives on."""
         base = self._bases[attr]
-        if base == BASE_MOTOR:
-            return self._motor
         if base == BASE_ODRIVE:
             return self._odrive
-        return self._controller
+        axis = safe_getattr(self._odrive, "axis0")  # only guarded level
+        return getattr(axis, base, None)
 
     def _sync_from_device(self):
         self._syncing = True
@@ -321,6 +326,8 @@ class _RowConfigPanel(QGroupBox):
         if attr is None:
             return
         obj = self._obj(attr)
+        if obj is None:
+            return
         try:
             setattr(obj.config, attr, value)
         except DEVICE_EXCEPTIONS as e:
@@ -336,6 +343,8 @@ class _RowConfigPanel(QGroupBox):
         if attr is None:
             return
         obj = self._obj(attr)
+        if obj is None:
+            return
         try:
             setattr(obj.config, attr, bool(checked))
         except DEVICE_EXCEPTIONS as e:
