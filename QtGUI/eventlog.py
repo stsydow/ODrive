@@ -24,8 +24,6 @@ from PySide6.QtWidgets import (
 
 logger = logging.getLogger(__name__)
 
-MAX_LOG = 1000
-
 
 @dataclass
 class LogEntry:

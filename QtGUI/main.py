@@ -677,21 +677,15 @@ class ODriveGUI(QMainWindow):
         try:
             if mode == CONTROL_MODE_VELOCITY_CONTROL:
                 self.controller.input_vel = self.vel_spinbox.value()
-                label = "Velocity"
+                self.log_event("SETPOINT", f"Velocity setpoint -> {self.vel_spinbox.value()}")
             elif mode == CONTROL_MODE_TORQUE_CONTROL:
                 self.controller.input_torque = self.torque_spinbox.value()
-                label = "Torque"
+                self.log_event("SETPOINT", f"Torque setpoint -> {self.torque_spinbox.value()}")
             elif mode == CONTROL_MODE_POSITION_CONTROL:
                 self.controller.input_pos = self.pos_spinbox.value()
-                label = "Position"
+                self.log_event("SETPOINT", f"Position setpoint -> {self.pos_spinbox.value()}")
             else:
                 return
-            value = {
-                CONTROL_MODE_VELOCITY_CONTROL: self.vel_spinbox.value(),
-                CONTROL_MODE_TORQUE_CONTROL: self.torque_spinbox.value(),
-                CONTROL_MODE_POSITION_CONTROL: self.pos_spinbox.value(),
-            }[mode]
-            self.log_event("SETPOINT", f"{label} setpoint -> {value}")
         except DEVICE_EXCEPTIONS as e:
             self.log_event("SETPOINT", f"failed to apply setpoint: {e}")
 
@@ -878,10 +872,9 @@ class ODriveGUI(QMainWindow):
         self.log_updated.emit()
         logger.debug("[%s] %s", category, message)
 
-    def _log_panel_write(self, msg, *_):
+    def _log_panel_write(self, msg):
         """Callback for the config panels' write feedback — routed into the
-        event log (the transient status-bar messages were removed). The
-        panels pass an (unused) timeout as the second argument."""
+        event log (the transient status-bar messages were removed)."""
         self.log_event("WRITE", msg)
 
     # ── Readings update ───────────────────────────────────────────────
@@ -994,8 +987,6 @@ class ODriveGUI(QMainWindow):
         elif not key and self._last_error_key:
             self.log_event("CLEAR", "errors cleared")
             self._last_error_key = None
-        elif not key:
-            self._last_error_key = None
         if report.any:
             union = 0
             for s in report.sources:
@@ -1031,7 +1022,7 @@ def main():
     parser = argparse.ArgumentParser(description="ODrive Qt GUI - Axis 0")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Enable DEBUG-level logging at startup")
-    args, _ = parser.parse_known_args()
+    args = parser.parse_args()
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,

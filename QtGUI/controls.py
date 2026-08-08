@@ -164,11 +164,11 @@ class InputModeSelector(QComboBox):
         try:
             self._controller.config.input_mode = value
             if self._status:
-                self._status(f"Input mode set to {self.currentText()}", 3000)
+                self._status(f"Input mode set to {self.currentText()}")
         except DEVICE_EXCEPTIONS as e:
             logger.warning("Failed to set input_mode: %s", e)
             if self._status:
-                self._status(f"Failed to set input mode: {e}", 3000)
+                self._status(f"Failed to set input mode: {e}")
 
 
 class _RowConfigPanel(QGroupBox):
@@ -326,7 +326,7 @@ class _RowConfigPanel(QGroupBox):
         except DEVICE_EXCEPTIONS as e:
             logger.warning("Failed to set %s: %s", attr, e)
             if self._status:
-                self._status(f"Failed to set {attr}: {e}", 3000)
+                self._status(f"Failed to set {attr}: {e}")
 
     def _on_check_toggled(self, checked):
         if self._syncing:
@@ -341,7 +341,7 @@ class _RowConfigPanel(QGroupBox):
         except DEVICE_EXCEPTIONS as e:
             logger.warning("Failed to set %s: %s", attr, e)
             if self._status:
-                self._status(f"Failed to set {attr}: {e}", 3000)
+                self._status(f"Failed to set {attr}: {e}")
 
 
 class SettingsTabs(_RowConfigPanel):
