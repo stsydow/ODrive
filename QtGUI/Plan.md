@@ -26,8 +26,7 @@ Project-wide rules. Implementation specifics (close behaviour, Ctrl+C, threading
 
 ## 1. Context
 
-**Hardware context:** the target machine (ODESC v4.2 board, ACT 42BLF03
-hall-sensor BLDC, Pfaff 130, 24 V / 8.3 A PSU) and the known-good device
+**Hardware context:** the target machine (ODESC v4.2 board, hall-sensor BLDC-Motor (78W), Pfaff 130 ) and the known-good device
 configuration (`sew_config`) are documented in **`Hardware.md`**. None of it is
 assumed at runtime (see §4.5 Portability): all parameter values are read from
 the connected device, never hard-coded.
@@ -73,11 +72,11 @@ Live-editable spinboxes that read the current device value on connect:
 |-----------|-----------|-------|-------|
 | Velocity gain | `controller.config.vel_gain` | N·m/(turn/s) | Main velocity tuning |
 | Velocity integrator gain | `controller.config.vel_integrator_gain` | N·m/turn | Removes steady-state error (accumulates `vel_error × dt`) |
-| Velocity integrator limit | `controller.config.vel_integrator_limit` | N·m | Cap integrator windup. Set to the 42BLF03 rated continuous torque (**0.188 N·m**, ~25 % of peak 0.75 N·m) — any value above the motor's continuous torque capability is effectively no cap. Community heuristic is ~50 % of peak torque; the tighter rated-continuous value is preferred for the sewing machine so the integrator never exceeds continuous rating |
+| Velocity integrator limit | `controller.config.vel_integrator_limit` | N·m | Cap integrator windup. Set to in relation to the motors rated continuous torque — any value above the motor's continuous torque capability is effectively no cap. Community heuristic is ~50 % of peak torque; the tighter rated-continuous value is preferred for the sewing machine so the integrator never exceeds continuous rating |
 | Position gain | `controller.config.pos_gain` | (turn/s)/turn | Position mode only |
 | Current limit | `motor.config.current_lim` | A | Show continuous / rated / peak context |
 | Current limit margin | `motor.config.current_lim_margin` | A | |
-| Velocity limit | `controller.config.vel_limit` | turn/s | Default to 70, controller error-stops if exceeded |
+| Velocity limit | `controller.config.vel_limit` | turn/s | controller error-stops if exceeded |
 | Enable torque-mode vel limit | `controller.config.enable_torque_mode_vel_limit` | bool | |
 | Gain scheduling | `controller.config.enable_gain_scheduling` | bool | |
 | Inertia (feed-forward) | `controller.config.inertia` | N·m/(turn/s²) | Write `inertia` once measured (Phase 4) |
@@ -199,8 +198,8 @@ A multi-page `QDialog` via `QStackedWidget`:
 | Step | Action | Error Handling |
 |------|--------|----------------|
 | **0. Pre-check** | ⚠ Ask the user to disengage the handwheel clutch and confirm. Belt load causes calibration to fail (motor jumps electrical revs). No sensor — relies on the user. |
-| **1. Motor Profile** | Load ACT 42BLF03 preset: `pole_pairs=8`, `motor_type=HIGH_CURRENT`, `current_lim=5.0`, phase R/L from config. Editable. | Validate pole_pairs × 6 = CPR |
-| **2. Encoder Config** | Set `mode=HALL`, CPR = 6 × pole_pairs = 48 | Validate consistency |
+| **1. Motor Profile** | Load the motor preset (`pole_pairs`, `motor_type`, `current_lim` — see `Hardware.md`), phase R/L from config. Editable. | Validate CPR = 6 × pole_pairs |
+| **2. Encoder Config** | Set `mode=HALL`, CPR = 6 × pole_pairs | Validate consistency |
 | **3. Motor Cal** | Run motor calibration, poll state + errors at 50 ms | Detect return to IDLE or error |
 | **4. Hall Phase Cal** | Run `ENCODER_HALL_PHASE_CALIBRATION` | Same polling + error decode |
 | **5. Hall Polarity Cal** | Run `ENCODER_HALL_POLARITY_CALIBRATION` | Same |
@@ -211,16 +210,17 @@ A multi-page `QDialog` via `QStackedWidget`:
 
 **Disconnect safety:** If the device disconnects during any step, the wizard shows an error. After reconnect, the wizard reads the device state to sync the UI — it does not change the device state. The user can retry or cancel the wizard.
 
-**Calibration current:** Pre-fills `calibration_current = 4.0`. If the motor jumps electrical revs, suggests increasing this value.
+**Calibration current:** Pre-fills `calibration_current` to the device's saved
+value. If the motor jumps electrical revs, suggests increasing it.
 
 **Finalize & save (`pre_calibrated`):** After the calibration steps pass, run a **functional test** (spin under control, confirm sensible readings). Only then set `encoder.config.pre_calibrated = true` (and `motor.config.pre_calibrated` when applicable) and **save** to NVM. Saving follows the project rule (see Design Principles): the device is put into **IDLE first** and the save requires **user confirmation** — so a calibration/config write can never occur while the motor is running.
 
 **Calibration current settings (distinct, from the interface):** several currents exist along the calibration paths and are exposed read/write in a dedicated **Calibration** tab of the Control Settings surface (beside Electrical Limits / Mechanical Limits / Control Parameters), so the operator can align them before calibrating:
-- `motor.config.calibration_current` — current for measuring phase R/L during `AXIS_STATE_MOTOR_CALIBRATION` (default 10 A; `sew_config` = 4.0 A).
-- `axis.config.calibration_lockin.current` — current for the open-loop lockin spins used by encoder offset / index / hall-polarity / hall-phase calibration (`encoder.cpp` uses `calibration_lockin`; default 10 A; `sew_config` = 5.7 A).
-- `axis.config.general_lockin.current` — current for `AXIS_STATE_LOCKIN_SPIN` (manual lockin spin; default 10 A; `sew_config` = 3.99 A).
+- `motor.config.calibration_current` — current for measuring phase R/L during `AXIS_STATE_MOTOR_CALIBRATION`; set relative to the motor's rated/torque-measurement current (the machine's tuned value is in `Hardware.md`).
+- `axis.config.calibration_lockin.current` — current for the open-loop lockin spins used by encoder offset / index / hall-polarity / hall-phase calibration (`encoder.cpp` uses `calibration_lockin`); set relative to the motor's rated current.
+- `axis.config.general_lockin.current` — current for `AXIS_STATE_LOCKIN_SPIN` (manual lockin spin).
 - `axis.config.sensorless_ramp.current` — sensorless-only, **not** used for this hall/BLDC machine (skip).
-- `motor.config.resistance_calib_max_voltage` — related calibration *voltage* (max V for R measurement; `sew_config` = 8.0 V), exposed alongside the currents.
+- `motor.config.resistance_calib_max_voltage` — related calibration *voltage* (max V for the R measurement), exposed alongside the currents.
 
 **Plumbing (future):** these live on `axis.config` (`calibration_lockin.{…}`), so the panel `bind()` gains an `axis` ref and the attribute-read/write helper gains dotted-path support (e.g. `calibration_lockin.current`). Generic and feature-gated (`hasattr`) like the rest of §1.
 
@@ -326,7 +326,7 @@ The GUI is explicitly **Axis 0 only**. This is documented in the UI and architec
 
 The GUI and all features must work with a different motor and PSU than this sewing-machine setup. `Hardware.md` is **reference context only** — a documentation of one known-good configuration for feasibility checks, **never an assumption about the live device**:
 - All parameter values (gains, limits, CPR, pole pairs, current/vel limits, setpoint ranges) are **read from the connected device at runtime**; nothing is hard-coded from `Hardware.md`.
-- Phase 1 spinbox ranges are generous (e.g. current limits 0–60 A) so a different motor/PSU is not clipped; per-row feature gating (§4.2) disables anything the firmware doesn't expose.
+- Phase 1 spinbox ranges are generous so a different motor/PSU is not clipped; per-row feature gating (§4.2) disables anything the firmware doesn't expose.
 - Calibration (Phase 4.2) uses the *device's existing* values as the starting point and validates consistency (CPR = 6 × pole_pairs) rather than assuming 8 pole pairs / CPR 48.
 - Machine-specific assumptions (belt ratio, SPM, pole count, PSU rating) are explicitly local to this setup and flagged as such.
 
