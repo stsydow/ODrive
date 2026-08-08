@@ -298,7 +298,7 @@ class _RowConfigPanel(QGroupBox):
                 box.blockSignals(True)
                 box.setEnabled(enabled)
                 if enabled:
-                    val = safe_getattr(obj.config, attr)
+                    val = obj.config.attr
                     if val is not None:
                         box.setValue(float(val))
                     else:
@@ -311,7 +311,7 @@ class _RowConfigPanel(QGroupBox):
                 cb.blockSignals(True)
                 cb.setEnabled(enabled)
                 if enabled:
-                    val = safe_getattr(obj.config, attr)
+                    val = obj.config.attr
                     if val is not None:
                         cb.setChecked(bool(val))
                 cb.blockSignals(False)

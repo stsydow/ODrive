@@ -802,15 +802,15 @@ class ODriveGUI(QMainWindow):
         except DEVICE_EXCEPTIONS:
             serial = "unknown"
         parts = (
-            safe_getattr(self.odrive, "fw_version_major"),
-            safe_getattr(self.odrive, "fw_version_minor"),
-            safe_getattr(self.odrive, "fw_version_revision"),
+            self.odrive.fw_version_major,
+            self.odrive.fw_version_minor,
+            self.odrive.fw_version_revision,
         )
         fw = ".".join(str(x) for x in parts) if None not in parts else "unknown"
 
-        hw_major = safe_getattr(self.odrive, "hw_version_major")
-        hw_minor = safe_getattr(self.odrive, "hw_version_minor")
-        hw_variant = safe_getattr(self.odrive, "hw_version_variant")
+        hw_major = self.odrive.hw_version_major
+        hw_minor = self.odrive.hw_version_minor
+        hw_variant = self.odrive.hw_version_variant
         if hw_major is not None and hw_minor is not None:
             hw = f"v{hw_major}.{hw_minor}"
             if hw_variant:
@@ -894,24 +894,6 @@ class ODriveGUI(QMainWindow):
             self._last_read_error = msg
         return False
 
-    def _read_value(self, name, fn, setter=None):
-        """Read a device value and apply it.
-
-        Centralises the try/except read pattern: `fn()` does
-        the device read, `setter(value)` updates the UI. Returns
-        `(value, fatal)` where `fatal` is True only when the read failed with
-        a disconnect (`ObjectLostError`) — the caller ORs it into the
-        reconnect counter. Non-fatal failures return `(None, False)` and are
-        logged once by `_read_failed`.
-        """
-        try:
-            value = fn()
-        except DEVICE_EXCEPTIONS as e:
-            return None, self._read_failed(name, e)
-        if setter is not None:
-            setter(value)
-        return value, False
-
     def update_readings(self):
         """Update displayed values from the ODrive. If reads fail repeatedly
         (and no _on_lost notification arrived), trigger a reconnect."""
@@ -937,38 +919,42 @@ class ODriveGUI(QMainWindow):
 
     def _read_voltages(self):
         """Read bus voltage/current and render power; return whether any read failed."""
-        any_failed = False
-        vbus, failed = self._read_value(
-            "vbus_voltage",
-            lambda: self.odrive.vbus_voltage,
-            lambda v: self.vbus_status_label.setText(f"{v:.1f} V"))
-        any_failed |= failed
-        ibus, failed = self._read_value("ibus", lambda: self.odrive.ibus)
-        any_failed |= failed
-        if vbus is not None and ibus is not None:
-            self.power_status_label.setText(f"{vbus * ibus:.1f} W")
-        else:
-            self.power_status_label.setText("-- W")
-        return any_failed
+        failed = False
+        try:
+            vbus = self.odrive.vbus_voltage
+            self.vbus_status_label.setText(f"{vbus:.1f} V")
+        except DEVICE_EXCEPTIONS as e:
+            vbus = None
+            failed |= self._read_failed("vbus_voltage", e)
+        try:
+            ibus = self.odrive.ibus
+        except DEVICE_EXCEPTIONS as e:
+            ibus = None
+            failed |= self._read_failed("ibus", e)
+        self.power_status_label.setText(
+            f"{vbus * ibus:.1f} W" if vbus is not None and ibus is not None else "-- W")
+        return failed
 
     def _read_estimates(self):
         """Read velocity/position estimates (wrapping position in circular
         mode) and render them; return whether any read failed."""
-        any_failed = False
-        _, failed = self._read_value(
-            "vel_estimate",
-            lambda: self.odrive.axis0.encoder.vel_estimate,
-            lambda v: self.vel_estimate_label.setText(f"est: {v:.3f} rps"))
-        any_failed |= failed
-        pos, failed = self._read_value("pos_estimate",
-                                       lambda: self.odrive.axis0.encoder.pos_estimate)
-        any_failed |= failed
+        failed = False
+        try:
+            vel = self.odrive.axis0.encoder.vel_estimate
+            self.vel_estimate_label.setText(f"est: {vel:.3f} rps")
+        except DEVICE_EXCEPTIONS as e:
+            failed |= self._read_failed("vel_estimate", e)
+        try:
+            pos = self.odrive.axis0.encoder.pos_estimate
+        except DEVICE_EXCEPTIONS as e:
+            pos = None
+            failed |= self._read_failed("pos_estimate", e)
         if pos is not None:
             rng = self._position_circular_range()
             if rng is not None:
                 pos = pos % rng  # wrap into [0, range) to match circular mode
             self.pos_estimate_label.setText(f"est: {pos:.4f} rev")
-        return any_failed
+        return failed
 
     def _refresh_errors(self):
         """Decode errors, update the footer Err indicator, and log transitions
