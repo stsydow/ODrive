@@ -57,7 +57,7 @@ from odrive.enums import (
     CONTROL_MODE_VELOCITY_CONTROL,
 )
 
-# Phase 1: Control Settings (Plan.md §1)
+# Control Settings panel
 from controls import InputModeSelector, SettingsTabs
 
 # Phase 2: Error display (Device menu / footer) + event log (Debug menu)
@@ -384,7 +384,7 @@ class ODriveGUI(QMainWindow):
         """Clean up on window close.
 
         UI-only: never touches the motor. The motor keeps running after the
-        GUI is closed (see Plan.md §4.6). Only the explicit Stop button or a
+        GUI is closed. Only the explicit Stop button or a
         user-selected axis state commands the device.
         """
         self.update_timer.stop()
@@ -899,7 +899,7 @@ class ODriveGUI(QMainWindow):
     def _read_value(self, name, fn, setter=None):
         """Read a device value and apply it.
 
-        Centralises the try/except read pattern (Plan.md §4.1): `fn()` does
+        Centralises the try/except read pattern: `fn()` does
         the device read, `setter(value)` updates the UI. Returns
         `(value, fatal)` where `fatal` is True only when the read failed with
         a disconnect (`ObjectLostError`) — the caller ORs it into the
@@ -1040,7 +1040,7 @@ def main():
     # KeyboardInterrupt is *not* serviced during exec() — a timer "nudge" is
     # unreliable. Restoring the default SIGINT action kills the process at the
     # OS level, always. This is safe because the UI is monitor/settings only
-    # and never drives realtime control (Plan.md §4.6): the motor keeps
+    # and never drives realtime control: the motor keeps
     # running independently.
     signal.signal(signal.SIGINT, signal.SIG_DFL)
 

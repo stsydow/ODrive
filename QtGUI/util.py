@@ -27,7 +27,7 @@ def safe_getattr(obj, *attrs, default=None):
 
         cur = safe_getattr(controller, "config", "input_mode")
 
-    Replaces scattered ``try/except: pass`` read blocks (Plan.md §4.1) while
+    Replaces scattered ``try/except: pass`` read blocks while
     keeping the caller responsible for handling `None`/`default`. Only
     `DEVICE_EXCEPTIONS` are swallowed; genuine libfibre errors propagate.
     """

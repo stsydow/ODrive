@@ -1,15 +1,17 @@
 # QtGUI — Development Plan
 
 A lightweight native desktop GUI for the ODrive brushless motor controller,
-focused on practical control of a single axis (Axis 0). This document is
-self-contained: all hardware context, configuration baselines, and design
-decisions are included.
+focused on practical control of a single axis (Axis 0).
+
+This document covers the **features and the context for why they exist**:
+- Machine / motor / device-config specifics → **`Hardware.md`**
+- Implementation details (connection, threading, design decisions) → **`ARCHITECTURE.md`**
 
 ---
 
 ## Design Principles
 
-Project-wide rules. Implementation specifics (close behaviour, Ctrl+C, threading) live in `ARCHITECTURE.md`.
+Project-wide rules. Implementation specifics (close behaviour, Ctrl+C, threading) live in `ARCHITECTURE.md`; device/motor context lives in `Hardware.md`.
 
 **The GUI is a monitor / settings interface, not a controller.**
 
@@ -22,66 +24,17 @@ Project-wide rules. Implementation specifics (close behaviour, Ctrl+C, threading
 
 ---
 
-## 1. Hardware & Firmware Context
+## 1. Context
 
-### Machine
+**Hardware context:** the target machine (ODESC v4.2 board, ACT 42BLF03
+hall-sensor BLDC, Pfaff 130, 24 V / 8.3 A PSU) and the known-good device
+configuration (`sew_config`) are documented in **`Hardware.md`**. None of it is
+assumed at runtime (see §4.5 Portability): all parameter values are read from
+the connected device, never hard-coded.
 
-| Item | Detail |
-|------|--------|
-| **Board** | ODESC v4.2 (STM32F405, ODrive v3.6-compatible clone) |
-| **Firmware** | Stock ODrive from this repo (v0.5.6 series), one-line mod: `otp_valid_ = true` in `Firmware/MotorControl/odrive_main.h:246` |
-| **Motor** | ACT 42BLF03 — 42mm BLDC, 24V, **hall sensors only** (no encoder) |
-| **Belt ratio** | ~3.8:1 motor:handwheel (belt slips — **no reliable ratio or SPM without a sensor** — dropped from scope) |
-| **Brake resistor** | 2 Ω (as delivered with board) |
-| **PSU** | 24 V / 8.3 A (~200 W) |
-| **Machine** | Pfaff 130 sewing machine, belt-driven. Mechanical clutch present (must be disengaged for calibration — belt load causes calibration to fail) |
-| **Future input** | Custom foot pedal (reflex optocoupler, 0–3.3 V / 0–5 V) with custom response curve |
-
-### Hall Sensor Resolution (verified from firmware)
-
-In `ENCODER_MODE_HALL`, ODrive produces **6 discrete states per electrical
-revolution** (60° electrical each). Effective encoder CPR = `6 × pole_pairs`.
-
-The working config has `motor.config.pole_pairs = 8` and `encoder.config.cpr = 48`
-(6 × 8 = 48). The ACT 42BLF03 datasheet lists "8 poles" — this corresponds to
-**8 pole pairs (16 physical poles)** in the ODrive config, which is correct.
-
-**Low-speed behavior:** The PLL interpolates between hall edges using `vel_estimate`.
-Below a threshold, the `snap_to_zero_vel` branch forces velocity to exactly 0,
-causing the vibration and cogging observed at low speed.
-
-### Known Good Configuration Baseline
-
-This is the saved working config (`sew_config`, Axis 0). The plan uses this as
-the baseline — any deviation during development is intentional and documented.
-
-See **Annex A** for the full parameter table. Key highlights:
-
-| Area | Key values |
-|------|-----------|
-| **Motor** | `pole_pairs = 8`, `motor_type = HIGH_CURRENT`, `current_lim = 5.0 A` (compromise, see Annex B), torque constant + phase R/L calibrated |
-| **Encoder** | `mode = HALL`, `cpr = 48`, hall polarity + phase calibrated, `pre_calibrated = true`, `bandwidth = 100` |
-| **Controller** | `control_mode = VELOCITY`, `vel_gain = 0.0346`, `vel_integrator_gain = 0.173`, `vel_integrator_limit = 0.188` (rated continuous torque), `vel_limit = 70`, `inertia = 0` |
-| **Input mode** | `input_mode = VEL_RAMP (2)` — smooth ramps for sewing machine |
-| **System** | `brake_resistance = 2 Ω`, `dc_max_positive_current = 8.3 A`, overvoltage trip 26.5 V |
-| **Thermistors** | FET monitored, motor thermistor disabled (continuous rating is the protection) |
-
-### Current State (GUI)
-
-A PySide6 GUI (`main.py` + `controls.py` + `errors.py` + `util.py`) focused on
-Axis 0 velocity control. See `ARCHITECTURE.md` for implementation details.
-
-**Capabilities now (✅ implemented):** Auto-connect/reconnect, velocity/position/
-torque mode switching, control-tuning tabs (Electrical Limits | Mechanical Limits |
-Control Parameters, feature-gated), an input-mode selector, setpoint spinboxes,
-Run/Stop, Programm dropdown + Start, 100 ms polling, save/export/import config,
-reboot, clear errors, current-errors dialog, an event log (Debug > Event Log…),
-device info dialog (serial + hardware/firmware version), verbose logging (read
-failures go to the debug log, not a dialog).
-
-**Gaps (planned, see roadmap):** Calibration workflow (Phase 4), Config Browser
-(Phase 2.4), monitoring/plotting (Phase 3), foot-pedal analog input (Phase 5),
-hall low-speed torque drive + friction compensation (Phase 4).
+**Implementation status:** the running GUI and its design decisions are
+documented in **`ARCHITECTURE.md`**; the roadmap below tracks what is done and
+what remains.
 
 ---
 
@@ -97,8 +50,9 @@ QtGUI/
 ├── calibration.py       # Calibration wizard + inertia/friction tests (Phase 4)   ⬜ planned
 ├── ruff.toml            # Lint config                                              ✅
 ├── check.sh             # Lint/type-check runner                                   ✅
-├── Plan.md              # ← this file
-└── ARCHITECTURE.md
+├── Plan.md              # ← this file (features + context)
+├── Hardware.md          # Machine / motor / device-config reference
+└── ARCHITECTURE.md      # Implementation details
 ```
 
 ---
@@ -359,7 +313,7 @@ The plan targets **ODrive v0.5.6 series** firmware. The GUI checks for **require
 | **UI** | Main window layout, signal wiring, menu actions | Manual testing per phase |
 | **Regression** | All phases combined | Baseline config check after each phase |
 
-No automated GUI testing (PySide6 `QTest` is too brittle for a single-developer project). Instead, the baseline config in Annex A is checked after each change.
+No automated GUI testing (PySide6 `QTest` is too brittle for a single-developer project). Instead, the baseline config in `Hardware.md` is checked after each change.
 
 ### 4.4 Multi-Axis Limitation
 
@@ -370,8 +324,8 @@ The GUI is explicitly **Axis 0 only**. This is documented in the UI and architec
 
 ### 4.5 Portability (motor / PSU agnostic)
 
-The GUI and all features must work with a different motor and PSU than this sewing-machine setup. Annex A is **reference context only** — a documentation of one known-good configuration for feasibility checks, **never an assumption about the live device**:
-- All parameter values (gains, limits, CPR, pole pairs, current/vel limits, setpoint ranges) are **read from the connected device at runtime**; nothing is hard-coded from Annex A.
+The GUI and all features must work with a different motor and PSU than this sewing-machine setup. `Hardware.md` is **reference context only** — a documentation of one known-good configuration for feasibility checks, **never an assumption about the live device**:
+- All parameter values (gains, limits, CPR, pole pairs, current/vel limits, setpoint ranges) are **read from the connected device at runtime**; nothing is hard-coded from `Hardware.md`.
 - Phase 1 spinbox ranges are generous (e.g. current limits 0–60 A) so a different motor/PSU is not clipped; per-row feature gating (§4.2) disables anything the firmware doesn't expose.
 - Calibration (Phase 4.2) uses the *device's existing* values as the starting point and validates consistency (CPR = 6 × pole_pairs) rather than assuming 8 pole pairs / CPR 48.
 - Machine-specific assumptions (belt ratio, SPM, pole count, PSU rating) are explicitly local to this setup and flagged as such.
@@ -405,128 +359,3 @@ only the permanent connection/state/error/bus states.
 | All others | Python stdlib | — | threading, pathlib, dataclasses, csv, json, collections |
 
 ---
-
-## 6. Annex A: Full Device Configuration (Known Good Baseline)
-
-From the user's saved config (`sew_config` — Axis 0, sewing machine motor).
-
-**This table is reference context only.** It documents one known-good configuration, used for feasibility checks and as a write-back example. It is **not** assumed to be the live device state, and every feature must work with a different motor/PSU — values are read from the connected device at runtime, never hard-coded (see §4.5 Portability).
-
-| Parameter | Value | Notes |
-|-----------|-------|-------|
-| `motor.config.pole_pairs` | **8** | 8 pole pairs → 48 hall counts/rev |
-| `motor.config.motor_type` | 0 (HIGH_CURRENT) | |
-| `motor.config.current_lim` | **5.0 A** | Compromise between continuous and peak ratings (see Annex B) |
-| `motor.config.current_lim_margin` | 8.0 A | Errors at 13 A |
-| `motor.config.requested_current_range` | 12.0 A | Current sensor range |
-| `motor.config.calibration_current` | 4.0 A | |
-| `motor.config.torque_constant` | 0.036 N·m/A | |
-| `motor.config.torque_lim` | 0.7 N·m | |
-| `motor.config.phase_resistance` | 0.348 Ω | Calibrated |
-| `motor.config.phase_inductance` | 0.140 mH | Calibrated |
-| `motor.config.pre_calibrated` | true | |
-| `encoder.config.mode` | 1 (HALL) | |
-| `encoder.config.cpr` | 48 | 6 × 8 pole pairs |
-| `encoder.config.hall_polarity_calibrated` | true | |
-| `encoder.config.pre_calibrated` | true | |
-| `encoder.config.phase_offset` | 101 | |
-| `encoder.config.phase_offset_float` | 0.677 | |
-| `encoder.config.direction` | 1 | |
-| `encoder.config.bandwidth` | 100 | PLL bandwidth |
-| `controller.config.control_mode` | **2 (VELOCITY)** | Reference baseline value for the sewing config (firmware enum: VELOCITY=2, TORQUE=1). Not assumed at runtime — GUI reads the live device value |
-| `controller.config.input_mode` | **2 (VEL_RAMP)** | Smooth ramps for sewing machine, uses `vel_ramp_rate` + `inertia` |
-| `controller.config.vel_gain` | 0.0346 N·m/(turn/s) | |
-| `controller.config.vel_integrator_gain` | 0.173 N·m/(turn/s·s) | |
-| `controller.config.vel_integrator_limit` | **0.188 N·m** | Rated continuous torque (42BLF03) — caps integrator windup |
-| `controller.config.vel_limit` | **70.0 turn/s** | ~4200 RPM — above motor rated 4000 RPM, kept for now |
-| `controller.config.vel_ramp_rate` | 50.0 turn/s² | |
-| `controller.config.pos_gain` | 2.5 (turn/s)/turn | |
-| `controller.config.inertia` | 0.0 | Feed-forward — not yet calibrated |
-| `controller.config.enable_overspeed_error` | true | |
-| `controller.config.enable_torque_mode_vel_limit` | true | |
-| `controller.config.enable_vel_limit` | true | |
-| `config.brake_resistance` | 2.0 Ω | |
-| `config.enable_brake_resistor` | true | |
-| `config.dc_max_positive_current` | 8.3 A | PSU limit |
-| `config.dc_max_negative_current` | -0.05 A | Regen limit |
-| `config.dc_bus_overvoltage_trip_level` | 26.5 V | |
-| `motor_thermistor.config.enabled` | false | No motor temp sensor — continuous rating protects motor |
-| `fet_thermistor.config.enabled` | true | FET temp monitored |
-
----
-
-## 7. Annex B: Motor Datasheet — 42BLF Series
-
-Source: `42BLF.PDF` (ACT MOTOR, 42BLF series brushless DC motor).
-
-### General Specifications
-
-| Parameter | Value |
-|-----------|-------|
-| Winding Type | Star |
-| Hall Effect Angle | 120° Electrical Angle |
-| Insulation Class | B |
-| Ambient Temperature | -20°C ~ +50°C |
-| Insulation Resistance | 100 MΩ min. (500 VDC) |
-| Dielectric Strength | 500 VAC 1 minute |
-
-### Electrical Specifications (per model)
-
-| Parameter | 42BLF01 | 42BLF02 | **42BLF03** |
-|-----------|---------|---------|----------|
-| Number of Poles | 8 | 8 | 8 |
-| Number of Phases | 3 | 3 | 3 |
-| Rated Voltage | 24 VDC | 24 VDC | 24 VDC |
-| Rated Speed | 4000 RPM | 4000 RPM | 4000 RPM |
-| Rated Torque | 0.063 N·m | 0.125 N·m | **0.188 N·m** |
-| Rated Current | 1.9 A | 3.4 A | **5.7 A** |
-| Output Power | 26 W | 52 W | **78 W** |
-| Peak Torque | 0.18 N·m | 0.38 N·m | **0.75 N·m** |
-| Peak Current | 5.7 A | 10.2 A | **18 A** |
-| Torque Constant | 0.035 N·m/A | 0.036 N·m/A | **0.036 N·m/A** |
-| Back EMF | 3.7 V/KRPM | 3.8 V/KRPM | **3.8 V/KRPM** |
-| Rotor Inertia | 24 g·cm² | 48 g·cm² | **72 g·cm²** |
-| Body Length | 47 mm | 63 mm | **79 mm** |
-| Mass | 0.33 kg | 0.48 kg | **0.63 kg** |
-
-**Note:** The user's conservative continuous current rating for this application
-(3.25 A) is lower than the datasheet rated current (5.7 A). The config compromise
-`current_lim = 5.0 A` sits between the two. Pole count "8" in the datasheet
-corresponds to `pole_pairs = 8` in the working device config.
-
----
-
-## 8. Change Log
-
-| Date | Change |
-|------|--------|
-| 2025-08 | Initial plan. Consolidation of original `Plan.md` — fixed contradictions, removed duplication, added Phase 0, corrected dependency mapping, corrected `input_mode` enum (value 6 = TORQUE_RAMP, not POS_FILTER), restored Annex A/B per user request. |
-| 2025-08 | Removed UI warning noise (speed/current/torque) — replaced with controller-level protections. Replaced firmware-version detection with `hasattr` feature checks. |
-| 2025-08 | Removed Phase 0 and Known Flaws section — Annex A is now the reference config (device will be reset and written). Updated Annex A values to the intended baseline (input_mode=VEL_RAMP, vel_limit=66.7). |
-| 2025-08 | Review fixes: reconnect threshold confirmed as 5 consecutive failures (~0.5 s) — corrected code + ARCHITECTURE.md (was 50/~5 s). Removed module line-count estimates in §1.3/§2.5 in favour of feature descriptions. Corrected `vel_integrator_gain` units (N·m/turn). Calibration wizard now detects `pre_calibrated` and offers Skip / stage-then-confirm Recalibrate. Split friction compensation out of the GUI-only measurement into an explicit standalone firmware stage. Device menu: "Dump Errors…"/"Clear Errors" replaced by a single "Errors…" action opening the new error panel. |
-| 2025-08 | Final baseline decisions: `vel_limit` kept at **70** (was 66.7) — any value >50 is practically no-limit since torque/current caps out first; `input_mode = VEL_RAMP (2)` everywhere. `vel_integrator_limit` set to **0.188 N·m** (42BLF03 rated continuous torque, ~25 % of peak) instead of 10.0, so the integrator can't demand more torque than the motor can continuously produce (community heuristic is ~50 % of peak torque — a tighter cap chosen deliberately). |
-| 2025-08 | Web review: added hall low-speed performance context (§4.1) with community references; documented why `TORQUE_RAMP` + `torque_ramp_rate` does not work in `VELOCITY` mode — see §4.4 future-torque-filter note. Corrected the control_mode enum: `CONTROL_MODE_VELOCITY_CONTROL = 2` (not 1), `TORQUE=1`. Added §4.5 Portability — Annex A is reference context only, never assumed as the live device state; features are motor/PSU-agnostic. |
-| 2025-08 | Added a top-level **Design Principles** section (UI is a monitor/settings interface, not a controller — never required for realtime control; closing/reconnecting/Ctrl+C never stops the motor; explicit Run/Stop/Execute-State only; no implicit `requested_state` writes; safety is the firmware/controller's job). §4.6 now cross-references it; the close/Ctrl+C *implementation* details moved to `ARCHITECTURE.md`. Ctrl+C switched to OS-level `SIG_DFL` (a Python `KeyboardInterrupt` isn't serviced while the Qt C++ event loop runs). Removed implicit `requested_state = IDLE` from `closeEvent` and reconnect cleanup. |
-| 2025-08 | Investigated calibration current settings from the interface; documented the distinct currents in §4.2 (`motor.config.calibration_current`, `axis.config.calibration_lockin.current`, `axis.config.general_lockin.current`, skip `sensorless_ramp.current`; + `resistance_calib_max_voltage`). Decision: expose them in a dedicated **Calibration** tab of the Control Settings surface (beside the existing three sections); requires an `axis` ref + dotted-path attribute support in `bind()`/row helpers. |
-| 2025-08 | Setpoints now require explicit confirmation: velocity/torque/position spinboxes no longer write on change — the active setpoint is sent only via the "Apply Setpoint" button or the Enter key. Added to the Design Principles (adjusting a field never commands the motor). |
-| 2025-08 | Replaced the single status label (which duplicated connection text) with a composed status footer (Plan.md §4.7): connection indicator ● Online/Offline/Connecting, Err: OK/err, bus voltage (V), and power draw (W = VBus × Ibus). Refreshed by the 100 ms poll; transient action messages stay separate. |
-| 2025-08 | Calibration finalize: after calibration + a functional test, set `encoder.config.pre_calibrated = true` (and motor `pre_calibrated` when applicable) then save. Saving rule added to Design Principles: any `save_configuration` is an explicit, user-confirmed action that puts the device into IDLE first. |
-| 2025-08 | Optional/"maybe-none" value access: added a shared `safe_getattr(obj, *attrs, default=None)` helper (guarded nested getattr for device reads; handles missing attributes and raised reads) and a general rule (Plan.md §4.1) — no scattered `try/except: pass`; optional reads default to None, while disconnect-distinguishing reads (`_read_value`/`_read_failed`) and writes keep explicit targeted try/except. Replaced `maybe_read(fn, default)` and the scattered attribute-read blocks across `main.py`, `controls.py`, `errors.py` with it. |
-| 2025-08 | Collapsed device state: the four stored references `axis`/`motor`/`encoder`/`controller` are gone; `self.odrive` is the single source of truth and the others are derived `safe_getattr`-backed read-only properties, so they can never go stale or drift out of sync. `connect_odrive`/`_on_connected` no longer hand-manage the object graph. |
-| 2025-08 | Removed the collapsible "Control Settings" group-box wrapper: the `SettingsTabs` panel is added directly to the main layout (no checkable box / toggle slot / intermediate layout), and the `_on_controls_collapsed` handler was deleted. |
-| 2025-08 | Device Info dialog now also shows the hardware version (`hw_version_major`/`minor`/`variant`, formatted `vX.Y` with an optional `-NV` suffix) read via `safe_getattr`. Removed the "Dump Read Failures" dialog/menu action — read failures already go to the debug log (`_read_failed` logs once per distinct error; `update_readings` logs the fallback reconnect counter), so the popup was redundant. |
-| 2025-08 | Fix: on switching to closed-loop (and on connect), the active setpoint display now reads the device's current input setpoint (new `_sync_setpoint_from_device()` per control mode) instead of a stale/reset local value; removed the zeroing of the velocity spinbox on Stop. |
-| 2025-08 | Phase 2 (error display) implemented: new `errors.py` (renamed from `monitoring.py`) with `read_error_report()` (structured decode of system/axis/motor/encoder/controller/sensorless), a live color-coded `ErrorPanel` with a bounded (1000) history and a history dialog (export to file). Replaced the raw error label and the Device menu's "Dump Errors"/"Clear Errors" with the decoded panel + a single "Errors…" history action. Fixed a source-base bug (axis module was reading odrv.error). Config Browser still pending (next). |
-| 2025-08 | Phase 2 (error display): factored the error display and the event log into two modules/dialogs — `errors.py` (`ErrorDialog`: current decoded errors + clear, Device > Errors… or the `Err:` footer) and `eventlog.py` (`LogDialog`: time-stamped connect/state/mode/setpoint/config/error/clear event log + export, Debug > Event Log…, works while disconnected so the run-up to a disconnect is visible). |
-| 2025-08 | Removed the "Readings" section; velocity & position estimates now live beside their setpoints in the "Control Command" area (compact `est:` labels). Bus voltage / power remain in the status footer. |
-| 2025-08 | Control Command rows are now mutually exclusive by control mode: the velocity setpoint row (incl. its estimate) is hidden unless in velocity mode, matching torque/position rows. |
-| 2025-08 | Unified the three Control Command setpoint rows: all built with shared `_make_setpoint_spin` / `_make_setpoint_row` helpers → identical `[label] [spinbox] [estimate?] [stretch]` layout; renamed `vel_set_row`→`vel_group`; immediate row-visibility on mode switch; dropped unused `format_current`/`QFont` imports. |
-| 2025-08 | Fix: in circular position mode the position estimate is now displayed wrapped into [0, circular_setpoint_range) (new `_position_circular_range()`), matching the circular setpoint behaviour instead of an accumulating raw count. |
-| 2025-08 | Moved the input-mode selector from the Control Settings panel into the Control Command section, restricted to modes valid for the current control mode (velocity: PASSTHROUGH/VEL_RAMP; position: PASSTHROUGH/POS_FILTER/TRAP_TRAJ; torque: PASSTHROUGH/TORQUE_RAMP). An inapplicable device input_mode is auto-corrected to the first valid mode on a mode change. |
-| 2025-08 | Consolidated the repeated polled-read try/except blocks in `update_readings` into a single `_read_value(name, fn, setter)` helper returning `(value, fatal)`: non-fatal failures are logged once and return None, only `ObjectLostError` feeds the reconnect counter. |
-| 2025-08 | Input-mode selector refinements: Passthrough is listed LAST (never the default) when a shaping mode exists; default is the recommended mode per control mode (VEL_RAMP / TORQUE_RAMP / TRAP_TRAJ), auto-correcting an inapplicable/Passthrough device mode; dropped the "— recommended" label suffix; combo auto-sizes to its longest item. |
-| 2025-08 | Axis-state dropdown uses friendly labels ("Lock-In Spin", "Motor Calibration", …) instead of raw enum names; mapping unchanged. |
-| 2025-08 | Renamed the axis-state dropdown label "State:" -> "Programm:" and the button "Execute State" -> "Start". |
-| 2025-08 | Footer state field shows friendly names: "Idle", "Control Loop", "Calibration: <Programm>" (preferring the dropdown program labels), with the redundant "State:" prefix dropped for a uniform footer. |
-| 2025-08 | Consolidated "Control Parameters" into the settings as a third tab (Electrical Limits | Mechanical Limits | Control Parameters), replacing the separate control-params section. |
-| 2025-08 | Ponytail cleanup (over-engineering pass): removed the unused `MAX_LOG` constant (log bound is the `deque(maxlen=1000)` in `main.py`); dropped the dead `timeout` second argument from the config panels' write-status callback (sole receiver `_log_panel_write(msg)` discarded it — call sites passed a constant 3000); inlined the redundant `value = {...}[mode]` dict in `_apply_setpoint` (the branch already knows the spinbox); removed the unreachable trailing `elif not key: self._last_error_key = None` branch in `_refresh_errors`; `parse_known_args` → `parse_args` (single `--verbose` flag, no positional args). Design unchanged. |

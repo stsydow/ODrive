@@ -1,5 +1,5 @@
 """
-Control Settings panel for the ODrive Qt GUI - Phase 1 (Plan.md §1).
+Control Settings panel for the ODrive Qt GUI.
 
 Layout (one level up for control params, which are config-editor values):
 
@@ -11,9 +11,9 @@ Layout (one level up for control params, which are config-editor values):
             └─ Mechanical Limits
 
 Values are read from the device on connect and written back on change.
-Feature-gating (Plan.md §4.2) uses `hasattr` checks: any parameter the
-attached firmware does not expose is disabled. Portable by design
-(Plan.md §4.5): values are read from the connected device, never assumed.
+Feature-gating uses `hasattr` checks: any parameter the
+attached firmware does not expose is disabled. Portable by design:
+values are read from the connected device, never assumed.
 """
 
 import logging
@@ -46,7 +46,7 @@ from util import DEVICE_EXCEPTIONS, safe_getattr
 
 logger = logging.getLogger(__name__)
 
-# Input modes exposed in the selector (Plan.md §1.2). Value -> display label.
+# Input modes exposed in the selector. Value -> display label.
 INPUT_MODES = {
     INPUT_MODE_PASSTHROUGH: "Passthrough",
     INPUT_MODE_VEL_RAMP: "Velocity Ramp",
@@ -345,7 +345,7 @@ class _RowConfigPanel(QGroupBox):
 
 
 class SettingsTabs(_RowConfigPanel):
-    """Consolidated settings as three tabs (Plan.md §1.1/§1.2):
+    """Consolidated settings as three tabs:
 
       Electrical Limits | Mechanical Limits | Control Parameters
     """

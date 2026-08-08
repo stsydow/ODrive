@@ -1,8 +1,8 @@
 """
-Error decode + current-error display for the ODrive Qt GUI - Phase 2 (Plan.md
-§2.1-2.3). Provides structured error decoding and the current-errors dialog
-(opened via Device > Errors... or the status footer error indicator). The
-chronological event log lives in `eventlog.py` (Debug > Event Log…).
+Error decode + current-error display for the ODrive Qt GUI. Provides
+structured error decoding and the current-errors dialog (opened via Device >
+Errors... or the status footer error indicator). The chronological event log
+lives in `eventlog.py` (Debug > Event Log…).
 """
 
 import logging
