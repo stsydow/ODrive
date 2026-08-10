@@ -98,6 +98,10 @@ ApplicationWindow {
         GroupBox {
             Layout.fillWidth: true
             title: "Control Command"
+            // Disable the whole subtree (mode/input combos, setpoint rows,
+            // Apply) when there is no device; setpoint rows add a finer
+            // closed-loop gate via backend.closedLoop below.
+            enabled: backend.connected
             ColumnLayout {
                 anchors.fill: parent
                 spacing: 4
