@@ -32,6 +32,13 @@ else
     echo "    (pyside6-qmllint not found - skipped)"
 fi
 
+echo "==> pytest (tests/, offscreen)"
+if python3 -c "import pytest" >/dev/null 2>&1; then
+    QT_QPA_PLATFORM=offscreen python3 -m pytest tests/ -q >/dev/null 2>&1 || fail=1
+else
+    echo "    (pytest not installed - skipped)"
+fi
+
 if [ "$fail" -ne 0 ]; then
     echo "==> FAILED"
     exit 1
