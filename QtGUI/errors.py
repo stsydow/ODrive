@@ -1,8 +1,8 @@
 """
-Error decode + current-error display for the ODrive Qt GUI. Provides
-structured error decoding and the current-errors dialog (opened via Device >
-Errors... or the status footer error indicator). The chronological event log
-lives in `eventlog.py` (Debug > Event Log…).
+Error decode for the ODrive QML GUI. Provides structured error decoding and
+text formatting. The QML error dialog (qml/ErrorDialog.qml) reads the decoded
+text live from the backend (Device > Errors... or the status footer error
+indicator). The chronological event log lives in `eventlog.py`.
 """
 
 import logging
@@ -10,14 +10,6 @@ import time
 from dataclasses import dataclass, field
 
 import odrive.enums
-from PySide6.QtCore import Slot
-from PySide6.QtWidgets import (
-    QDialog,
-    QHBoxLayout,
-    QPlainTextEdit,
-    QPushButton,
-    QVBoxLayout,
-)
 
 from util import safe_getattr
 
@@ -89,38 +81,3 @@ def format_current(report):
         detail = " | ".join(s.errors) if s.errors else f"0x{s.value:X}"
         lines.append(f"{s.name}: {detail}")
     return "\n".join(lines)
-
-
-class ErrorDialog(QDialog):
-    """Current decoded errors (Device > Errors… or the footer Err indicator)."""
-
-    def __init__(self, report, clear_fn=None, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Errors")
-        self.resize(480, 360)
-        self._clear_fn = clear_fn
-
-        outer = QVBoxLayout(self)
-        self.text = QPlainTextEdit()
-        self.text.setReadOnly(True)
-        self.text.setPlainText(
-            format_current(report) if report is not None
-            else "(no current-error snapshot — device not connected)")
-        outer.addWidget(self.text)
-
-        row = QHBoxLayout()
-        self.clear_btn = QPushButton("Clear Errors")
-        self.clear_btn.setEnabled(clear_fn is not None)
-        self.clear_btn.clicked.connect(self._clear)
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        row.addWidget(self.clear_btn)
-        row.addStretch()
-        row.addWidget(close_btn)
-        outer.addLayout(row)
-
-    @Slot()
-    def _clear(self):
-        if self._clear_fn:
-            self._clear_fn()
-            self.text.setPlainText("No errors.")

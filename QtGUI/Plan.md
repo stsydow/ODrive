@@ -11,7 +11,7 @@ This document covers the **features and the context for why they exist**:
 
 ## Design Principles
 
-Project-wide rules. Implementation specifics (close behaviour, Ctrl+C, threading) live in `ARCHITECTURE.md`; device/motor context lives in `Hardware.md`.
+Project-wide rules. Implementation specifics (close behavior, Ctrl+C, threading) live in `ARCHITECTURE.md`; device/motor context lives in `Hardware.md`.
 
 **The GUI is a monitor / settings interface, not a controller.**
 
@@ -68,18 +68,18 @@ QtGUI/
 
 Live-editable spinboxes that read the current device value on connect:
 
-| Parameter | Attribute | Units | Notes |
-|-----------|-----------|-------|-------|
-| Velocity gain | `controller.config.vel_gain` | N·m/(turn/s) | Main velocity tuning |
-| Velocity integrator gain | `controller.config.vel_integrator_gain` | N·m/turn | Removes steady-state error (accumulates `vel_error × dt`) |
-| Velocity integrator limit | `controller.config.vel_integrator_limit` | N·m | Cap integrator windup. Set to in relation to the motors rated continuous torque — any value above the motor's continuous torque capability is effectively no cap. Community heuristic is ~50 % of peak torque; the tighter rated-continuous value is preferred for the sewing machine so the integrator never exceeds continuous rating |
-| Position gain | `controller.config.pos_gain` | (turn/s)/turn | Position mode only |
-| Current limit | `motor.config.current_lim` | A | Show continuous / rated / peak context |
-| Current limit margin | `motor.config.current_lim_margin` | A | |
-| Velocity limit | `controller.config.vel_limit` | turn/s | controller error-stops if exceeded |
-| Enable torque-mode vel limit | `controller.config.enable_torque_mode_vel_limit` | bool | |
-| Gain scheduling | `controller.config.enable_gain_scheduling` | bool | |
-| Inertia (feed-forward) | `controller.config.inertia` | N·m/(turn/s²) | Write `inertia` once measured (Phase 4) |
+| Parameter                    | Attribute                                        | Units         | Notes                                                                                                                                                                                                                                                                                                                                   |
+|------------------------------|--------------------------------------------------|---------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Velocity gain                | `controller.config.vel_gain`                     | N·m/(turn/s)  | Main velocity tuning                                                                                                                                                                                                                                                                                                                    |
+| Velocity integrator gain     | `controller.config.vel_integrator_gain`          | N·m/turn      | Removes steady-state error (accumulates `vel_error × dt`)                                                                                                                                                                                                                                                                               |
+| Velocity integrator limit    | `controller.config.vel_integrator_limit`         | N·m           | Cap integrator windup. Set to in relation to the motors rated continuous torque — any value above the motor's continuous torque capability is effectively no cap. Community heuristic is ~50 % of peak torque; the tighter rated-continuous value is preferred for the sewing machine so the integrator never exceeds continuous rating |
+| Position gain                | `controller.config.pos_gain`                     | (turn/s)/turn | Position mode only                                                                                                                                                                                                                                                                                                                      |
+| Current limit                | `motor.config.current_lim`                       | A             | Show continuous / rated / peak context                                                                                                                                                                                                                                                                                                  |
+| Current limit margin         | `motor.config.current_lim_margin`                | A             |                                                                                                                                                                                                                                                                                                                                         |
+| Velocity limit               | `controller.config.vel_limit`                    | turn/s        | controller error-stops if exceeded                                                                                                                                                                                                                                                                                                      |
+| Enable torque-mode vel limit | `controller.config.enable_torque_mode_vel_limit` | bool          |                                                                                                                                                                                                                                                                                                                                         |
+| Gain scheduling              | `controller.config.enable_gain_scheduling`       | bool          |                                                                                                                                                                                                                                                                                                                                         |
+| Inertia (feed-forward)       | `controller.config.inertia`                      | N·m/(turn/s²) | Write `inertia` once measured (Phase 4)                                                                                                                                                                                                                                                                                                 |
 
 #### 1.2 Input Mode Selector ✅
 
@@ -152,7 +152,116 @@ class AxisErrors:
 - `controls.py` also provides the read-only Config Browser dialog (`QDialog` + `QTreeWidget`). ⬜ not yet implemented
 - Device menu: the standalone "Dump Errors…"/"Clear Errors" become a single "Errors…" action (plus a clickable `Err:` footer field) that opens the error dialog; "Config Browser…" still to be added. ✅ / ⬜
 
-### Phase 3: Monitoring & Plotting (NEXT ⬜)
+### Phase 2.5: Migrate UI to QML (DONE ✅ / 2.5.5 acceptance ⬜)
+
+**Goal:** Swap the QWidget front-end for a declarative **Qt Quick (QML)** UI while
+keeping every feature and design principle intact. The migration is a front-end
+swap, not a rework: all device logic (connection, 100 ms poll, error decode,
+config read/write, event log) stays in Python and is exposed to QML through one
+backend `QObject`.
+
+**Why this shape:** the connection/threading model in `ARCHITECTURE.md` (`threading.Thread`
++ `QTimer.singleShot(0, ...)` crossings, single source of truth `self.odrive`) is
+Qt-mechanism-based, not widget-based — it survives the swap unchanged. QML takes
+over layout, state binding, and dialog chrome; Python keeps the logic that is
+testable and hardware-coupled. `PySide6` already ships QtQml/QtQuick in the repo
+venv, so no new dependency.
+
+#### Structure
+
+```
+QtGUI/
+├── main.py          # entry: QQmlApplicationEngine + backend wiring
+├── backend.py       # GuiBackend(QObject) — the single QML-facing API
+├── qml/
+│   ├── main.qml            # ApplicationWindow: menubar, control bar, footer, command, settings
+│   ├── SpinRow.qml         # reusable numeric settings row (see 2.5.3)
+│   ├── CheckRow.qml        # reusable boolean settings row (see 2.5.3)
+│   ├── SetpointRow.qml     # reusable Control Command setpoint row
+│   └── dialogs.qml         # Error/EventLog/DeviceInfo dialogs (2.5.4, TODO)
+├── errors.py        # read_error_report stays; ErrorDialog → QML (2.5.4)
+├── eventlog.py      # LogEntry/format_log stay; LogDialog → QML (2.5.4)
+└── util.py          # unchanged
+```
+
+#### 2.5.1 Backend object (`backend.py`) ✅
+
+The current `ODriveGUI` logic (device ref, connect/reconnect, poll timer, control
+handlers, setpoint sync, feature gating, event log) relocates into
+`GuiBackend(QObject)` unchanged in substance, exposed to QML as the context
+property `backend`:
+
+| QML side (binding / handler) | Backend side |
+|------------------------------|--------------|
+| `backend.connText` / `connColor` | `_set_conn()` behaviour |
+| `backend.stateText`, `errorText`, `vbusText`, `powerText` | the 100 ms poll results |
+| `backend.run()`, `stop()`, `applySetpoint()`, `startState(name)` | existing `on_run_*` / `_apply_setpoint` |
+| `backend.setMode(name)`, `inputModeModel` | mode/input-mode change + selector population |
+| `backend.setConfig(base, attr, value)` / `refreshConfig()` | settings read/write + `hasattr` gating |
+| `backend.logEvent(cat, msg)`, signal `logUpdated` | event log + live viewer |
+| `backend.actionSave/Export/Import/Reboot/Info/ForceReconnect()` | menu actions; `QMessageBox` prompts → QML `Dialog` |
+
+#### 2.5.2 Main window (`qml/main.qml`) ✅
+
+The status footer lives in the `ApplicationWindow.footer` property (pinned to the
+window bottom, like the old `QStatusBar`) — not a row in the body layout.
+
+Qt Quick Controls 2 `ApplicationWindow`, mirroring the current layout 1:1:
+- **Menubar:** Device (Save/Export/Import Config, Reboot, Errors, Device Info) + Debug (Verbose, Event Log, Force Reconnect) — actions call backend slots.
+- **Control bar:** ▶ Run / ■ Stop + Program dropdown + Start (states execute only via explicit button, unchanged).
+- **Status footer:** the five composed fields (connection / state / error / VBus / power), bound to backend properties; the `Err:` field stays clickable. Error transitions keep logging to the event log.
+- **Control Command:** mode combo + input-mode selector + the three setpoint rows (velocity/torque/position) with the same visibility switching and closed-loop `enabled` gating; setpoints go to the device only on **Apply** / **Enter** (no implicit writes).
+
+#### 2.5.3 Settings tabs — declarative rows, no spec tables ✅
+
+`controls.py`'s `_SPINS`/`_CHECKS` positional-tuple tables and the
+`_write_scalar_rows` pairing parser are widget-era scaffolding and are **not**
+ported. Instead, one reusable component per row type + a generic backend config
+API:
+
+- `SpinRow.qml` / `CheckRow.qml` components declare a parameter as named
+  properties (`attr`, `base`, `label`, `unit`, `min`, `max`, `decimals`,
+  `step`); each row self-manages feature gating, read-on-bind and
+  write-on-change against the backend.
+- Backend gains three generic slots: `hasConfig(base, attr)` (the `hasattr`
+  gate), `getConfig(base, attr)` (read-on-bind), `setConfig(base, attr, value)`
+  (write-on-change, `DEVICE_EXCEPTIONS`-guarded, with a sync guard so a
+  backend refresh doesn't echo-write).
+- Tabs become `ColumnLayout`s of named rows (two rows share a line via a
+  `RowLayout` where wanted — no pairing parser). Tooltips (`requested_current_range`)
+  are row properties.
+- What remains in Python: gating + read/write semantics, error handling,
+  tooltip text. `_RowConfigPanel`/`SettingsTabs` are deleted.
+
+#### 2.5.4 Dialogs ✅
+
+Error dialog, Event Log, and Device Info are Qt Quick Controls `Dialog`s
+(`qml/ErrorDialog.qml`, `qml/EventLogDialog.qml`, `qml/DeviceInfoDialog.qml`)
+opened from the menubar / footer. Dialog content is backend-exposed: the error
+dialog binds `backend.errorsText`, the event log binds live `backend.logText`,
+and device info calls `backend.deviceInfoText()` on open. Native `QFileDialog`
+for config import/export and log export stays in the backend (native and free);
+`backend.exportLog()` writes the current log text. The import/reboot confirm
+prompts keep `QMessageBox` (synchronous native modals — deferred; convert to
+QML `Dialog`s only if styling is wanted). Event Log stays non-modal + live via
+the `logUpdated` signal. Widget `ErrorDialog`/`LogDialog` classes are deleted
+from `errors.py`/`eventlog.py`, which now hold only pure logic.
+
+Error dialog, Event Log, and Device Info become Qt Quick Controls `Dialog`s in
+`dialogs.qml`, opened from the menubar / footer. Native file dialogs for
+config import/export stay `QFileDialog` (called from the backend — native and
+free). The import/reboot confirm prompts become QML `Dialog`s. Event Log keeps
+its non-modal live-update behaviour via the `logUpdated` signal.
+
+#### 2.5.5 Acceptance
+
+Same manual test pass as the widget UI: connect, run/stop, mode switch, setpoint
+apply (Enter + button), settings edit with device echo, errors view + clear,
+event log (offline-capable), config export/import, reboot with auto-reconnect,
+unplug → error + reconnect. `check.sh` extends to the new `.py` modules; QML is
+checked with `qmllint` (shipped with PySide6).
+
+### Phase 3: Monitoring & Plotting (⬜)
 
 **Goal:** Live visual feedback for tuning, plus data logging.
 
@@ -193,7 +302,7 @@ A "Low-speed torque mode" preset that:
 
 #### 4.2 Calibration Wizard (`calibration.py`)
 
-A multi-page `QDialog` via `QStackedWidget`:
+A multipage `QDialog` via `QStackedWidget`:
 
 | Step | Action | Error Handling |
 |------|--------|----------------|
@@ -351,11 +460,11 @@ only the permanent connection/state/error/bus states.
 
 ## 5. Dependencies
 
-| Feature | Dependency | Version | Purpose |
-|---------|-----------|---------|---------|
-| Core | PySide6 | ≥ 6.0 | Qt bindings |
-| Core | odrive | ≥ 0.5.0 | Device communication (local in `tools/odrive/`) |
-| Phase 3+ | pyqtgraph | ≥ 0.12 | Live plotting |
-| All others | Python stdlib | — | threading, pathlib, dataclasses, csv, json, collections |
+| Feature    | Dependency    | Version | Purpose                                                 |
+|------------|---------------|---------|---------------------------------------------------------|
+| Core       | PySide6       | ≥ 6.0   | Qt bindings                                             |
+| Core       | odrive        | ≥ 0.5.0 | Device communication (local in `tools/odrive/`)         |
+| Phase 3+   | pyqtgraph     | ≥ 0.12  | Live plotting                                           |
+| All others | Python stdlib | —       | threading, pathlib, dataclasses, csv, json, collections |
 
 ---

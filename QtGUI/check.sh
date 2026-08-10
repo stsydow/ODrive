@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Static checks for the QtGUI: lint (ruff) + type-check (mypy) + compile.
+# Static checks for the QtGUI: lint (ruff) + type-check (mypy) + compile +
+# qmllint.
 #
-# This script does NOT install anything — it assumes `ruff` and `mypy` are
-# already available (interpreter/venv on PATH). See ARCHITECTURE.md.
+# This script does NOT install anything — it assumes `ruff`, `mypy` and
+# `pyside6-qmllint` are already available (interpreter/venv on PATH). See
+# ARCHITECTURE.md.
 #
 # Optional formatting check (not gated here - formatting is a separate,
 # opt-in step that normalizes a large part of the codebase):
@@ -16,12 +18,19 @@ fail=0
 echo "==> ruff check ."
 ruff check . || fail=1
 
-echo "==> mypy (main, controls, errors, eventlog, util)"
+echo "==> mypy (main, backend, errors, eventlog, util)"
 mypy --no-incremental --ignore-missing-imports \
-     main.py controls.py errors.py eventlog.py util.py || fail=1
+     main.py backend.py errors.py eventlog.py util.py || fail=1
 
 echo "==> python -m py_compile (all modules)"
-python3 -m py_compile main.py controls.py errors.py eventlog.py util.py || fail=1
+python3 -m py_compile main.py backend.py errors.py eventlog.py util.py || fail=1
+
+echo "==> qmllint (qml/)"
+if command -v pyside6-qmllint >/dev/null 2>&1; then
+    pyside6-qmllint qml/*.qml >/dev/null 2>&1 || fail=1
+else
+    echo "    (pyside6-qmllint not found - skipped)"
+fi
 
 if [ "$fail" -ne 0 ]; then
     echo "==> FAILED"
