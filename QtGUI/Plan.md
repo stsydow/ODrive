@@ -167,21 +167,31 @@ over layout, state binding, and dialog chrome; Python keeps the logic that is
 testable and hardware-coupled. `PySide6` already ships QtQml/QtQuick in the repo
 venv, so no new dependency.
 
+**Result:** `controls.py` and the widget `ODriveGUI`/dialog classes are removed;
+`errors.py`/`eventlog.py` hold only pure logic; `backend.py` + `qml/` replaced the
+widget tree. The UI uses the **Fusion** Qt Quick style (desktop look, matches the
+old widget theme). A headless **pytest suite** (`tests/`, offscreen + mock ODrive)
+covers the backend logic and QML loading/linkage.
+
 #### Structure
 
 ```
 QtGUI/
-├── main.py          # entry: QQmlApplicationEngine + backend wiring
-├── backend.py       # GuiBackend(QObject) — the single QML-facing API
+├── main.py          # entry: QApplication + QQmlApplicationEngine + backend wiring
+├── backend.py       # GuiBackend(QObject) — the single QML-facing API (all device logic)
+├── errors.py        # read_error_report / format_current (pure logic)
+├── eventlog.py      # LogEntry / format_log (pure logic)
+├── util.py          # unchanged
 ├── qml/
-│   ├── main.qml            # ApplicationWindow: menubar, control bar, footer, command, settings
-│   ├── SpinRow.qml         # reusable numeric settings row (see 2.5.3)
-│   ├── CheckRow.qml        # reusable boolean settings row (see 2.5.3)
-│   ├── SetpointRow.qml     # reusable Control Command setpoint row
-│   └── dialogs.qml         # Error/EventLog/DeviceInfo dialogs (2.5.4, TODO)
-├── errors.py        # read_error_report stays; ErrorDialog → QML (2.5.4)
-├── eventlog.py      # LogEntry/format_log stay; LogDialog → QML (2.5.4)
-└── util.py          # unchanged
+│   ├── main.qml            # ApplicationWindow: menubar, control bar, pinned footer,
+│   │                       #   Control Command, Settings tabs (2-column grid)
+│   ├── SetpointRow.qml     # editable DoubleSpinBox setpoint row (Control Command)
+│   ├── SpinRow.qml         # reusable numeric settings row (feature-gated)
+│   ├── CheckRow.qml        # reusable boolean settings row (feature-gated)
+│   ├── ErrorDialog.qml     # movable Window dialog, live errorsText
+│   ├── EventLogDialog.qml  # movable non-modal Window, live logText
+│   └── DeviceInfoDialog.qml # movable Window dialog
+└── tests/          # headless pytest (offscreen, mock ODrive)
 ```
 
 #### 2.5.1 Backend object (`backend.py`) ✅
@@ -195,11 +205,11 @@ property `backend`:
 |------------------------------|--------------|
 | `backend.connText` / `connColor` | `_set_conn()` behaviour |
 | `backend.stateText`, `errorText`, `vbusText`, `powerText` | the 100 ms poll results |
-| `backend.run()`, `stop()`, `applySetpoint()`, `startState(name)` | existing `on_run_*` / `_apply_setpoint` |
-| `backend.setMode(name)`, `inputModeModel` | mode/input-mode change + selector population |
-| `backend.setConfig(base, attr, value)` / `refreshConfig()` | settings read/write + `hasattr` gating |
-| `backend.logEvent(cat, msg)`, signal `logUpdated` | event log + live viewer |
-| `backend.actionSave/Export/Import/Reboot/Info/ForceReconnect()` | menu actions; `QMessageBox` prompts → QML `Dialog` |
+| `backend.run()`, `stop()`, `applySetpoint()`, `startState(name)` | existing `on_*` control handlers |
+| `backend.setMode(name)`, `inputModes`, `setInputMode(idx)` | mode/input-mode change + selector population |
+| `backend.setConfig/getConfig/hasConfig(base, attr, ...)` | settings read/write + `hasattr` gating |
+| `backend.logEvent(cat, msg)`, signal `logUpdated`, `logText` | event log + live viewer |
+| `backend.save/export/importConfig()`, `reboot()`, `clearErrors()`, `exportLog()`, `deviceInfoText()`, `forceReconnect()`, `setVerbose()` | menu/footer actions (`QFileDialog`/`QMessageBox` native) |
 
 #### 2.5.2 Main window (`qml/main.qml`) ✅
 
@@ -227,39 +237,39 @@ API:
   gate), `getConfig(base, attr)` (read-on-bind), `setConfig(base, attr, value)`
   (write-on-change, `DEVICE_EXCEPTIONS`-guarded, with a sync guard so a
   backend refresh doesn't echo-write).
-- Tabs become `ColumnLayout`s of named rows (two rows share a line via a
-  `RowLayout` where wanted — no pairing parser). Tooltips (`requested_current_range`)
-  are row properties.
+- Tabs become `GridLayout`s of named rows (each tab is a 2-column grid via
+  `columns: 2`, one row per param). Tooltips (`requested_current_range`) are row
+  properties.
 - What remains in Python: gating + read/write semantics, error handling,
   tooltip text. `_RowConfigPanel`/`SettingsTabs` are deleted.
 
 #### 2.5.4 Dialogs ✅
 
-Error dialog, Event Log, and Device Info are Qt Quick Controls `Dialog`s
-(`qml/ErrorDialog.qml`, `qml/EventLogDialog.qml`, `qml/DeviceInfoDialog.qml`)
-opened from the menubar / footer. Dialog content is backend-exposed: the error
-dialog binds `backend.errorsText`, the event log binds live `backend.logText`,
-and device info calls `backend.deviceInfoText()` on open. Native `QFileDialog`
-for config import/export and log export stays in the backend (native and free);
-`backend.exportLog()` writes the current log text. The import/reboot confirm
-prompts keep `QMessageBox` (synchronous native modals — deferred; convert to
-QML `Dialog`s only if styling is wanted). Event Log stays non-modal + live via
-the `logUpdated` signal. Widget `ErrorDialog`/`LogDialog` classes are deleted
-from `errors.py`/`eventlog.py`, which now hold only pure logic.
+Error dialog, Event Log, and Device Info are top-level Qt Quick **`Window`s**
+(`qml/ErrorDialog.qml`, `qml/EventLogDialog.qml`, `qml/DeviceInfoDialog.qml`) —
+native title bar, movable/resizable, sized to their content — opened from the
+menubar / footer (`errorDialog.show()` etc.). Dialog content is backend-exposed:
+the error dialog binds `backend.errorsText`, the event log binds live
+`backend.logText`, and device info calls `backend.deviceInfoText()` on open.
+Native `QFileDialog` for config import/export and log export stays in the backend
+(`backend.exportLog()`); the import/reboot confirm prompts keep `QMessageBox`
+(synchronous native modals — deferred; convert to QML prompts only if styling is
+wanted). Event Log stays non-modal + live via the `logUpdated` signal. Widget
+`ErrorDialog`/`LogDialog` classes are deleted from `errors.py`/`eventlog.py`, which
+now hold only pure logic.
 
-Error dialog, Event Log, and Device Info become Qt Quick Controls `Dialog`s in
-`dialogs.qml`, opened from the menubar / footer. Native file dialogs for
-config import/export stay `QFileDialog` (called from the backend — native and
-free). The import/reboot confirm prompts become QML `Dialog`s. Event Log keeps
-its non-modal live-update behaviour via the `logUpdated` signal.
+#### 2.5.5 Acceptance ⬜ (tests done, device pass pending)
 
-#### 2.5.5 Acceptance
+Automated: `check.sh` runs ruff, mypy, py_compile, **qmllint** (ships with
+PySide6), and a headless **pytest** suite (`qtgui/tests/`, `QT_QPA_PLATFORM=offscreen`,
+mock ODrive) covering backend logic (mode/setpoint/mode-switch, config API,
+errors/device-info/event-log text) and QML loading + linkage (mode/input-mode
+combo follow the backend).
 
-Same manual test pass as the widget UI: connect, run/stop, mode switch, setpoint
+Remaining manual pass on a real ODrive: connect, run/stop, mode switch, setpoint
 apply (Enter + button), settings edit with device echo, errors view + clear,
 event log (offline-capable), config export/import, reboot with auto-reconnect,
-unplug → error + reconnect. `check.sh` extends to the new `.py` modules; QML is
-checked with `qmllint` (shipped with PySide6).
+unplug → error + reconnect.
 
 ### Phase 3: Monitoring & Plotting (⬜)
 
