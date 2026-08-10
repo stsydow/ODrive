@@ -4,6 +4,7 @@ A lightweight PySide6 desktop GUI for monitoring and controlling a single ODrive
 (velocity-focused, with position and torque modes). Device/motor specifics live in
 `Hardware.md`. This file documents how the code is put together and why. When in doubt,
 the code is the source of truth — this doc is the durable why, not a line-by-line log.
+Process patterns and lessons live in `Methods.md` (read it before changing the code).
 
 ## Design Principles
 
