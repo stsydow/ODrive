@@ -15,44 +15,60 @@ code and below).
   velocity/current limiting) is **enforced by the firmware** running on the controller.
   The UI shall write setpoints and select a modes, but does not drive or supervise the
   control loop. Once a speed is set, the motor keeps running independently of the GUI.
-- **The device state is the source of truth** and closing the GUI, reconnecting, 
+- **The device state is the source of truth** and closing the GUI, reconnecting,
   or losing connection may happen but is not a big deal and never stops the motor.
-  The GUI reads the state on connect and preiodically to reflect the device state.
+  The GUI reads the state on connect and periodically to reflect the device state.
   It commands the device only through explicit user actions.
   Connect/disconnect transitions only tear down GUI references — there are **no implicit writes**.
 - **Setpoint and parameter changes are applied only on explicit confirmation** (Apply button or Enter key).
   Adjusting a setpoint field never commands the motor; only a confirmed apply sends it.
 
+## UI Stack: Qt Quick (QML) + a single Python backend
+
+The UI is declarative **QML** (Qt Quick Controls, Fusion style); all device logic lives
+in one Python `GuiBackend(QObject)` exposed to QML as the context property `backend`.
+QML binds to `backend`'s properties, calls its slots, and reacts to its signals; it never
+talks to the device directly. This keeps layout/state declarative in QML and the
+hardware-coupled, testable logic in Python.
+
 ## Module Layout
 
 ```
 QtGUI/
-├── main.py        # App entry, main window (ODriveGUI), menus, connection, 100ms poll
-├── controls.py    # Control Settings (SettingsTabs) + InputModeSelector
-├── errors.py      # Error decode (read_error_report) + current-errors dialog
-├── eventlog.py    # In-memory event log + viewer (LogEntry/LogDialog)
+├── main.py        # App entry: QApplication + QQmlApplicationEngine + context wiring
+├── backend.py     # GuiBackend(QObject): the single QML-facing API (all device logic)
+├── errors.py      # Error decode (read_error_report) + text formatting (pure logic)
+├── eventlog.py    # In-memory event log + formatting (LogEntry/format_log, pure logic)
 ├── util.py        # safe_getattr() guarded reads + DEVICE_EXCEPTIONS
-├── ruff.toml / check.sh   # lint config + static-check runner
+├── qml/
+│   ├── main.qml            # ApplicationWindow: menubar, control bar, footer, command, settings
+│   ├── SetpointRow.qml     # reusable Control Command setpoint row (DoubleSpinBox)
+│   ├── SpinRow.qml / CheckRow.qml   # reusable settings rows (feature-gated)
+│   └── ErrorDialog / EventLogDialog / DeviceInfoDialog.qml  # movable Window dialogs
+├── tests/         # headless pytest suite (offscreen, mock ODrive)
+├── ruff.toml / check.sh   # lint config + static-check + test runner
 ├── Hardware.md            # machine / motor / device-config reference
 └── ARCHITECTURE.md        # ← this file
 ```
 
-`ODriveGUI(QMainWindow)` owns all UI and state. The device root (`self.odrive`) is the
+`GuiBackend` owns all UI state and the device logic. The device root (`self.odrive`) is the
 single source of truth; `axis`/`motor`/`encoder`/`controller` are derived read-only
 properties (`safe_getattr`-backed) so they can never go stale or drift out of sync.
+QML owns presentation only: it binds to `backend.*` properties (updated on the 100 ms
+poll) and invokes `backend.*()` slots for user actions.
 
 ## Connection Lifecycle
 
 ```
-App start ─ QTimer.singleShot(500ms) ─▶ connect_odrive()
+App start ─ QTimer.singleShot(500ms) ─▶ connectOdrive()
                 └─ threading.Thread(_connect_worker) ─▶ odrive.find_any()  (blocks)
                      ├─ success ─▶ _on_connected(): store odrive, register _on_lost,
-                     │              bind controls, enable UI
+                     │              enable UI (emit connChanged)
                      └─ failure  ─▶ _on_connect_failed(): retry after 1s
 
 Device lost (USB unplug / reboot)
-  └─ PRIMARY:  odrv._on_lost fires (library discovery thread) ─▶ connect_odrive()
-       └─ if reads raise ObjectLostError in update_readings but _on_lost never
+  └─ PRIMARY:  odrv._on_lost fires (library discovery thread) ─▶ connectOdrive()
+       └─ if reads raise ObjectLostError in updateReadings but _on_lost never
           fired (a library bug): caught centrally, logged with traceback, polling
           stopped and reconnect attempted — so the miss is visible, not silent.
 ```
@@ -64,32 +80,60 @@ Qt event loop — no mutexes or custom signals).
 
 | Thread | Work |
 |--------|------|
-| **Main (Qt event loop)** | All UI: poll timer (`update_readings`), control/state/mode handlers, menus |
+| **Main (Qt event loop)** | All QML + backend: poll timer (`updateReadings`), control/state/mode handlers, event log |
 | **Background daemon** | `_connect_worker` → blocking `odrive.find_any()`; result delivered via `QTimer.singleShot(0, ...)` |
-| **Library discovery thread** | `odrv._on_lost` → `_on_device_lost()` → `QTimer.singleShot(0, connect_odrive)` |
+| **Library discovery thread** | `odrv._on_lost` → `_on_device_lost()` → `QTimer.singleShot(0, connectOdrive)` |
 
-Qt widgets are only ever touched from the main thread.
+Qt objects (the QML window and the backend) are only ever touched from the main thread.
+
+## QML ↔ Backend bridge
+
+`backend` is registered as a context property (`engine.rootContext().setContextProperty("backend", ...)`),
+so QML accesses it by name everywhere (menus, rows, dialogs). The contract:
+
+- **Properties** — connection (`connected`, `connText`, `connColor`), status footer
+  (`stateText`, `errorText`, `errorColor`, `vbusText`, `powerText`), control command
+  (`currentMode`, `inputModes`, `currentInputMode`, three setpoint values, two estimate
+  labels), and `closedLoop` (drives setpoint gating). Each has a notify signal so QML
+  bindings re-evaluate only when the value changes.
+- **Notifications** — poll writes only emit when the displayed string/value actually
+  changes (avoid re-rendering on every 100 ms tick). Dialog content (`errorsText`,
+  `logText`) is a live-bound property updated on the relevant change signal.
+- **Slots** — `run()`, `stop()`, `startState(name)`, `setMode(name)`,
+  `setInputMode(idx)`, `setActiveSetpoint(v)`, `applySetpoint()`, `setConfig/getConfig/hasConfig`,
+  `save/export/importConfig`, `reboot`, `clearErrors`, `exportLog`, `deviceInfoText`,
+  `setVerbose`, `forceReconnect`.
+- **Sync, not write-through** — a setpoint row's `DoubleSpinBox` is *not* bound to the
+  device; user edits stay local (`setActiveSetpoint`) and reach the device only on
+  `applySetpoint()` / Enter. The box re-syncs from `backend` on the setpoint-changed
+  signal (QML's `valueModified` fires only on interactive edits, so it can't echo back).
 
 ## Key Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
 | **Single source of truth** | `self.odrive` is the only stored device ref; axis/motor/encoder/controller are `safe_getattr`-backed properties — removes a five-field state that could drift/stale across reconnects. |
+| **QML context property, one `backend` object** | One `QObject` is the whole QML-facing API; no per-field signal plumbing. `setContextProperty` is the runtime bridge (qmllint relies on this, hence `.qmllint.ini` demoting the `unqualified`/`ContextProperties` warnings — a known false positive for injected backends). |
 | **`threading.Thread` + `QTimer.singleShot(0,...)`** | A plain daemon thread plus a posted timer beats `QThread`/`moveToThread` boilerplate for one blocking call, and is equally safe (Qt is thread-safe for `singleShot`). |
-| **`_on_lost` primary, read-failure fallback** | `_on_lost` gives instant disconnect notification; a 5×-consecutive-read-failure counter (≈0.5s) catches cases where it doesn't fire. |
-| **`safe_getattr` + `_read_value`/`_read_failed`** | Centralize reads so a transient failure logs once and returns a default; only `ObjectLostError` drives the reconnect counter. |
+| **`_on_lost` primary, `ObjectLostError` fallback** | `_on_lost` gives instant disconnect notification; a central `ObjectLostError` catch in `updateReadings` catches the (rare) case where it doesn't fire, stops polling and reconnects. |
 | **Catch only `DEVICE_EXCEPTIONS`** | The expected, transient fibre/odrive failures (`ObjectLostError`, `EOFError`, `TimeoutError`, `OSError`, `CancelledError`). A bare generic libfibre `Exception` is a bug and is left uncaught so it surfaces with a stack trace. |
-| **`hasattr` feature gating** | Disable any row/action the attached firmware doesn't expose (e.g. `reboot()`, `exit` missing) instead of assuming a version string. |
-| **`MODE_NAMES` / `STATE_MAP` dicts** | Enum ↔ display-name maps instead of fragile `globals()` lookups or `if/elif` chains. |
 | **`_on_lost.done()` guard on connect** | If the device dropped before the callback is registered, schedule a fresh reconnect rather than letting `add_done_callback` fire in the connect thread. |
 | **States execute only via button** | Selecting a dropdown item just sets the selection; only Start/Execute actually commands the device — browsing can't accidentally start a calibration. |
 | **Confirmed setpoint apply** | Spinboxes never write on change; the active setpoint goes to the device only on Apply / Enter. |
-| **Control Command gating** | Setpoint inputs enabled only while the axis is in `CLOSED_LOOP_CONTROL` (checked each poll); the mode combo stays usable while connected. |
-| **Status footer + on-demand dialogs** | Permanent composed footer (connect/state/error/VBus/power) keeps the main area focused; errors, event log, config, and device info are dialogs opened from menus/footer. |
-| **Event log, non-modal + live** | `log_event` records device-side history (connect/state/mode/setpoint/error/clear) so a run-up to an error is visible, even offline. The viewer is a single shared instance updated via a signal (`log_updated`), not a poll or static snapshot. |
-| **No transient status-bar messages** | Action feedback and write failures go to the event log (persistent context), not ephemeral `statusBar().showMessage()`. |
+| **Two-tier UI gating** | The whole Control Command group is `enabled: backend.connected` (disables mode/input combos offline); setpoint rows additionally gate on `backend.closedLoop` (only while running). Settings tab is gated on `connected`. |
+| **Status footer pinned to window bottom** | `ApplicationWindow.footer` holds the composed connect/state/error/VBus/power bar (like the old `QStatusBar`), keeping the main area focused. |
+| **Dialogs as top-level `Window`s** | Error, Event Log, and Device Info are separate Qt Quick `Window`s (native title bar, movable/resizable) sized to their content layout — not frameless popups. File dialogs stay native `QFileDialog`. |
+| **Event log, non-modal + live** | `logEvent` records device-side history (connect/state/mode/setpoint/error/clear) so a run-up to an error is visible, even offline. The viewer binds `backend.logText` live via the `logUpdated` signal (no polling), and works while disconnected. |
+| **No transient status-bar messages** | Action feedback and write failures go to the event log (persistent context), not ephemeral status messages. |
 | **Auto-connect/reconnect, no manual button** | Startup auto-connect + loss auto-reconnect; the footer shows state. |
 | **Ctrl+C via `SIG_DFL`** | The Qt event loop is a blocking C++ call, so a Python `KeyboardInterrupt` isn't serviced during `exec()`. Restoring the default SIGINT action terminates reliably from any state. Safe because the GUI is monitor-only. |
+
+## Feature Gating
+
+Parameters the attached firmware doesn't expose are disabled rather than assumed from a
+version string. Settings rows check `backend.hasConfig(base, attr)` on connect and disable
+themselves if missing; the backend's `getConfig`/`setConfig` pass through `DEVICE_EXCEPTIONS`
+and never write when the attribute is absent. `reboot()` is similarly `hasattr`-gated.
 
 ## Exception Handling
 
@@ -100,17 +144,24 @@ use `safe_getattr`. Never blanket-swallow `Exception`. `sys.path` bootstrap for
 
 ## Adding a New Feature
 
-1. **New control widget**: add it in `setup_ui()`, wire signals to a slot.
-2. **New device call**: call on `self.odrive` (or a property like `self.controller`),
-   wrap in `try/except DEVICE_EXCEPTIONS`; leave unknown errors uncaught.
-3. **New reading**: add a label + update it in `update_readings()`.
-4. **New disconnect trigger**: `_on_lost` handles most cases; reconnects automatically.
+1. **New control widget**: add a reusable component under `qml/` (or inline in `main.qml`),
+   bound to `backend` properties/slots; wire the underlying logic in `backend.py`.
+2. **New device call**: add a `@Slot` on `GuiBackend`, wrap in `try/except DEVICE_EXCEPTIONS`;
+   leave unknown errors uncaught. Call it from QML via `backend.method()`.
+3. **New reading**: add a property + notify signal in `backend.py`, update it in
+   `updateReadings()` (only emitting when the value changes), and bind a QML label to it.
+4. **New setting param**: add a `SpinRow`/`CheckRow` in the relevant `main.qml` tab with
+   `base`/`attr`; the backend's generic `setConfig/getConfig/hasConfig` handle gating + IO.
+5. **New disconnect trigger**: `_on_lost` handles most cases; reconnects automatically.
 
 ## Development Tooling
 
-- **`./check.sh`** — `ruff check .`, `mypy` on the QtGUI modules, `py_compile`. Assumes
-  `ruff`/`mypy` are on PATH (venv). Optional formatting (opt-in, normalizes the tree):
-  `ruff format .`.
+- **`./check.sh`** — `ruff check .`, `mypy` on the QtGUI modules, `py_compile`, `qmllint`
+  on `qml/`, and a headless `pytest` run (`QT_QPA_PLATFORM=offscreen`, mock ODrive).
+  Skips `pyside6-qmllint`/`pytest` gracefully if not installed. `ruff`/`mypy`/`pytest` are
+  expected on PATH (venv). Optional formatting (opt-in, normalizes the tree): `ruff format .`.
+- **`tests/`** — pytest suite: backend unit tests against a mock device + QML load/linkage
+  tests offscreen. No hardware or display required.
 - **Commit titles** follow Conventional Commits (`type(scope): summary`, imperative,
   ≤72 chars) with a title, blank line, then a short what/why body. Example:
   `fix: read device setpoint into display on closed-loop entry`.
