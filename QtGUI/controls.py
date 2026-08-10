@@ -111,22 +111,19 @@ class InputModeSelector(QComboBox):
         """Attach the device root, enable the box and populate for its mode."""
         self._odrive = odrive
         controller = self._controller()
-        if controller is None or not hasattr(controller.config, "input_mode"):
+        if controller is None:
             self.clear()
             self.setEnabled(False)
             return
         self.setEnabled(True)
-        self._apply_for_mode(self._read_mode())
+
+        self._apply_for_mode(controller.config.control_mode)
 
     def set_control_mode(self, control_mode):
         """Repopulate for a (possibly new) control mode."""
         if self._controller() is None:
             return
         self._apply_for_mode(control_mode)
-
-    def _read_mode(self):
-        controller = self._controller()
-        return None if controller is None else controller.config.control_mode
 
     def _apply_for_mode(self, control_mode):
         controller = self._controller()
@@ -275,7 +272,7 @@ class _RowConfigPanel(QGroupBox):
     def bind(self, odrive):
         """Attach the device root and (re)load values + feature availability."""
         self._odrive = odrive
-        if safe_getattr(odrive, "axis0", "controller") is None:
+        if safe_getattr(odrive, "axis0") is None:
             self.setEnabled(False)
             return
         self.setEnabled(True)
