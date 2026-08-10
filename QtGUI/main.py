@@ -67,9 +67,8 @@ from util import DEVICE_EXCEPTIONS, safe_getattr
 
 logger = logging.getLogger(__name__)
 
-# Fallback safety net: consecutive read failures (at 100ms poll) before reconnect.
-# The odrive library's _on_lost callback is the primary disconnect detection.
-RECONNECT_FAIL_THRESHOLD = 5  # ~0.5 seconds
+# The odrive library's `_on_lost` callback is the sole disconnect detector; a
+# read that raises DEVICE_EXCEPTIONS means _on_lost missed it (see update_readings).
 RECONNECT_RETRY_DELAY_MS = 1000
 
 # Control mode <-> display name
@@ -147,9 +146,7 @@ class ODriveGUI(QMainWindow):
 
         self._connecting = False
         self._connected = False
-        self._read_fail_count = 0
         self._last_synced_mode = None
-        self._last_read_error = None
         self._last_report = None
         self._last_error_key = None
         self.event_log = deque(maxlen=1000)
@@ -394,7 +391,6 @@ class ODriveGUI(QMainWindow):
             logger.debug("connect_odrive: stale device reference cleared")
 
         self._connecting = True
-        self._read_fail_count = 0
         self._last_synced_mode = None
         self._set_conn("● Connecting…", "orange")
 
@@ -429,7 +425,6 @@ class ODriveGUI(QMainWindow):
         logger.debug("on_connected: wiring up device")
         self.odrive = odrv
         self._connecting = False
-        self._read_fail_count = 0
         logger.debug("on_connected: axis0 wired")
 
         # The odrive library notifies us when this device disconnects
@@ -551,7 +546,12 @@ class ODriveGUI(QMainWindow):
         axis = safe_getattr(self.odrive, "axis0")
         if axis is None:
             return
-        axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+        try:
+            axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+        except DEVICE_EXCEPTIONS as e:
+            logger.warning("Failed to run closed loop: %s", e)
+            self.log_event("STATE", f"failed to run: {e}")
+            return
         # Show the device's actual setpoint, not a stale/reset local value.
         self._sync_setpoint_from_device()
         self.log_event("STATE", "Run: Closed Loop")
@@ -562,7 +562,12 @@ class ODriveGUI(QMainWindow):
         axis = safe_getattr(self.odrive, "axis0")
         if axis is None:
             return
-        axis.requested_state = AXIS_STATE_IDLE
+        try:
+            axis.requested_state = AXIS_STATE_IDLE
+        except DEVICE_EXCEPTIONS as e:
+            logger.warning("Failed to stop: %s", e)
+            self.log_event("STATE", f"failed to stop: {e}")
+            return
         self.log_event("STATE", "Stop: Idle")
 
     @Slot(str)
@@ -694,7 +699,12 @@ class ODriveGUI(QMainWindow):
             return
         state = STATE_MAP.get(state_str)
         if state is not None:
-            axis.requested_state = state
+            try:
+                axis.requested_state = state
+            except DEVICE_EXCEPTIONS as e:
+                logger.warning("Failed to start %s: %s", state_str, e)
+                self.log_event("STATE", f"failed to start {state_str}: {e}")
+                return
             self.log_event("STATE", f"Start: {state_str}")
         else:
             logger.warning("Unknown axis state requested: %s", state_str)
@@ -822,7 +832,6 @@ class ODriveGUI(QMainWindow):
             f"Serial number: {serial}",
             f"Firmware: {fw}",
             f"Hardware: {hw}",
-            f"Read failures: {self._read_fail_count}",
         ]
         logger.info("Device info:\n%s", "\n".join(lines))
         QMessageBox.information(self, "Device Info", "\n".join(lines))
@@ -877,38 +886,31 @@ class ODriveGUI(QMainWindow):
 
     # ── Readings update ───────────────────────────────────────────────
 
-    def _read_failed(self, name, exc):
-        """Handle a read failure. Returns True if it's a device disconnect
-        (ObjectLostError), or False if it's a non-fatal error (e.g. attribute
-        not supported on this firmware).
-
-        Non-fatal errors are logged at DEBUG only on the first occurrence
-        to avoid spamming the log at 10 Hz.
-        """
-        if isinstance(exc, fibre.libfibre.ObjectLostError):
-            logger.debug("Failed to read %s: device lost", name)
-            return True
-        msg = f"{name}: {exc}"
-        if msg != self._last_read_error:
-            logger.debug("Failed to read %s", msg)
-            self._last_read_error = msg
-        return False
-
     def update_readings(self):
-        """Update displayed values from the ODrive. If reads fail repeatedly
-        (and no _on_lost notification arrived), trigger a reconnect."""
+        """Update displayed values from the ODrive (100 ms poll).
+
+        Disconnect detection is `_on_lost` alone. Reads are unguarded: a
+        device loss surfaces here as ObjectLostError, and since _on_lost is
+        trusted, an exception at this point means the callback failed — a bug
+        worth diagnosing. Catch it centrally, log the traceback, and stop
+        polling so it doesn't raise every tick.
+        """
         if self.odrive is None:
             return
-
-        self.sync_ui_from_controller()
-        self._update_control_enabled()
-
-        # Keep Control Command gating + footer state in sync each poll.
-        self._refresh_state_footer()
-        any_failed = self._read_voltages()
-        any_failed |= self._read_estimates()
-        self._refresh_errors()
-        self._handle_read_failures(any_failed)
+        try:
+            self.sync_ui_from_controller()
+            self._update_control_enabled()
+            self._refresh_state_footer()
+            self._read_voltages()
+            self._read_estimates()
+            self._refresh_errors()
+        except fibre.libfibre.ObjectLostError:
+            # _on_lost should have fired first; if we got here it didn't.
+            logger.warning("update_readings: read failed but _on_lost did not fire",
+                           exc_info=True)
+            self._set_controls_enabled(False)
+            self.odrive = None  # stop polling; reconnect via connect_odrive
+            self.connect_odrive()
 
     def _refresh_state_footer(self):
         """Update the axis-state label in the status footer from the device."""
@@ -918,43 +920,22 @@ class ODriveGUI(QMainWindow):
             self.state_status_label.setText(_state_display(st))
 
     def _read_voltages(self):
-        """Read bus voltage/current and render power; return whether any read failed."""
-        failed = False
-        try:
-            vbus = self.odrive.vbus_voltage
-            self.vbus_status_label.setText(f"{vbus:.1f} V")
-        except DEVICE_EXCEPTIONS as e:
-            vbus = None
-            failed |= self._read_failed("vbus_voltage", e)
-        try:
-            ibus = self.odrive.ibus
-        except DEVICE_EXCEPTIONS as e:
-            ibus = None
-            failed |= self._read_failed("ibus", e)
-        self.power_status_label.setText(
-            f"{vbus * ibus:.1f} W" if vbus is not None and ibus is not None else "-- W")
-        return failed
+        """Read bus voltage/current and render power."""
+        vbus = self.odrive.vbus_voltage
+        self.vbus_status_label.setText(f"{vbus:.1f} V")
+        ibus = self.odrive.ibus
+        self.power_status_label.setText(f"{vbus * ibus:.1f} W")
 
     def _read_estimates(self):
         """Read velocity/position estimates (wrapping position in circular
-        mode) and render them; return whether any read failed."""
-        failed = False
-        try:
-            vel = self.odrive.axis0.encoder.vel_estimate
-            self.vel_estimate_label.setText(f"est: {vel:.3f} rps")
-        except DEVICE_EXCEPTIONS as e:
-            failed |= self._read_failed("vel_estimate", e)
-        try:
-            pos = self.odrive.axis0.encoder.pos_estimate
-        except DEVICE_EXCEPTIONS as e:
-            pos = None
-            failed |= self._read_failed("pos_estimate", e)
-        if pos is not None:
-            rng = self._position_circular_range()
-            if rng is not None:
-                pos = pos % rng  # wrap into [0, range) to match circular mode
-            self.pos_estimate_label.setText(f"est: {pos:.4f} rev")
-        return failed
+        mode) and render them."""
+        vel = self.odrive.axis0.encoder.vel_estimate
+        self.vel_estimate_label.setText(f"est: {vel:.3f} rps")
+        pos = self.odrive.axis0.encoder.pos_estimate
+        rng = self._position_circular_range()
+        if rng is not None:
+            pos = pos % rng  # wrap into [0, range) to match circular mode
+        self.pos_estimate_label.setText(f"est: {pos:.4f} rev")
 
     def _refresh_errors(self):
         """Decode errors, update the footer Err indicator, and log transitions
@@ -981,23 +962,6 @@ class ODriveGUI(QMainWindow):
         else:
             self.error_status_label.setText("Err: OK")
             self.error_status_label.setStyleSheet("color: green; font-weight: bold;")
-
-    def _handle_read_failures(self, any_failed):
-        """Fallback disconnect detection (primary is the `_on_lost` callback)."""
-        if any_failed:
-            self._read_fail_count += 1
-            if self._read_fail_count == RECONNECT_FAIL_THRESHOLD:
-                logger.debug("update_readings: %d consecutive read failures", self._read_fail_count)
-            if (not self._connecting
-                    and self._read_fail_count >= RECONNECT_FAIL_THRESHOLD):
-                logger.warning("update_readings: fallback reconnect triggered after %d failures",
-                               self._read_fail_count)
-                self._set_controls_enabled(False)
-                self.connect_odrive()
-        else:
-            if self._read_fail_count > 0:
-                logger.debug("update_readings: reads recovered after %d failures", self._read_fail_count)
-            self._read_fail_count = 0
 
 
 def main():

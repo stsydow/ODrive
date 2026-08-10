@@ -12,14 +12,15 @@ code and below).
 
 - **The GUI is a monitor / settings interface, not a controller.** It never performs
   realtime control and never should be required to. Safety (limits, error-stops,
-  velocity/current limiting) is enforced by the **firmware + controller**.
-- The UI may write a setpoint or select a mode, but **does not drive or supervise** the
-  control loop. Once a speed is set, **the motor keeps running independently** of the GUI.
-- **Closing the GUI, reconnecting, or losing connection never stops the motor.** The GUI
-  commands the device only through explicit user actions: **Run (Closed Loop)**,
-  **Stop (Idle)**, and **Execute State**. Connect/disconnect transitions only tear down
-  GUI references — there are **no implicit writes** to `requested_state`.
-- **Setpoints are applied only on explicit confirmation** (Apply button or Enter key).
+  velocity/current limiting) is **enforced by the firmware** running on the controller.
+  The UI shall write setpoints and select a modes, but does not drive or supervise the
+  control loop. Once a speed is set, the motor keeps running independently of the GUI.
+- **The device state is the source of truth** and closing the GUI, reconnecting, 
+  or losing connection may happen but is not a big deal and never stops the motor.
+  The GUI reads the state on connect and preiodically to reflect the device state.
+  It commands the device only through explicit user actions.
+  Connect/disconnect transitions only tear down GUI references — there are **no implicit writes**.
+- **Setpoint and parameter changes are applied only on explicit confirmation** (Apply button or Enter key).
   Adjusting a setpoint field never commands the motor; only a confirmed apply sends it.
 
 ## Module Layout
@@ -50,8 +51,10 @@ App start ─ QTimer.singleShot(500ms) ─▶ connect_odrive()
                      └─ failure  ─▶ _on_connect_failed(): retry after 1s
 
 Device lost (USB unplug / reboot)
-  ├─ PRIMARY:  odrv._on_lost fires (library discovery thread) ─▶ connect_odrive()
-  └─ FALLBACK: update_readings sees 5 consecutive read failures (~0.5s) ─▶ connect_odrive()
+  └─ PRIMARY:  odrv._on_lost fires (library discovery thread) ─▶ connect_odrive()
+       └─ if reads raise ObjectLostError in update_readings but _on_lost never
+          fired (a library bug): caught centrally, logged with traceback, polling
+          stopped and reconnect attempted — so the miss is visible, not silent.
 ```
 
 All worker→UI crossings go through `QTimer.singleShot(0, ...)` (thread-safe post to the
