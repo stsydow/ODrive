@@ -5,36 +5,29 @@ text live from the backend (Device > Errors... or the status footer error
 indicator). The chronological event log lives in `eventlog.py`.
 """
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
 
 import odrive.enums
+from fibre import ObjectLostError
 
-from util import safe_getattr
+# Expected, transient device-communication failures worth handling gracefully
+# (return a default / show an error / trigger a reconnect). A bare generic
+# `Exception` from libfibre ("internal error", "peer misbehaving", "unknown
+# error") is a BUG and is deliberately NOT caught, so it surfaces with a stack
+# trace instead of being silently swallowed.
 
-logger = logging.getLogger(__name__)
-
-# (display name, object path, enum prefix) read per poll
-_ERROR_SOURCES = (
-    ("system", "error", "ODRIVE_ERROR_"),
-    ("axis", "error", "AXIS_ERROR_"),
-    ("motor", "motor.error", "MOTOR_ERROR_"),
-    ("encoder", "encoder.error", "ENCODER_ERROR_"),
-    ("controller", "controller.error", "CONTROLLER_ERROR_"),
-    ("sensorless", "sensorless_estimator.error", "SENSORLESS_ESTIMATOR_ERROR_"),
+DEVICE_EXCEPTIONS = (
+    ObjectLostError,
+    EOFError,
+    TimeoutError,
+    OSError,          # transport / I/O (ConnectionError is a subclass)
+    asyncio.CancelledError,
 )
 
-
-def _decode(value, prefix):
-    """Return the names of all error bits set in `value` for `*_ERROR_*` enums."""
-    out = []
-    for name, const in vars(odrive.enums).items():
-        if not name.startswith(prefix) or not isinstance(const, int):
-            continue
-        if value & const:
-            out.append(name)
-    return out
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -54,21 +47,39 @@ class ErrorReport:
         return any(s.value for s in self.sources)
 
 
-def read_error_report(odrv, axis):
+def read_error_report(odrv):
     """Read all error values into a structured ErrorReport.
 
-    Reads are guarded: a missing sub-object is skipped (optional-only reads —
-    they feed display, not the disconnect counter)."""
+    Reads are guarded: if the ODrive or its axis0 is missing, an empty report
+    is returned. Otherwise, it reads errors from known sub-objects.
+    """
     report = ErrorReport(timestamp=time.time())
-    sources = []
-    for name, path, prefix in _ERROR_SOURCES:
-        obj = odrv if name == "system" else axis
-        value = safe_getattr(obj, *path.split("."))
-        if value is None:
-            continue  # module not present on this firmware
-        if value:
-            sources.append(ErrorModule(name, value, _decode(value, prefix)))
-    report.sources = sources
+    if odrv is None:
+        return report
+
+    try:
+        axis0 = odrv.axis0
+        sources = []
+
+        def check(name, val, prefix):
+            if not val:
+                return
+            # Inline bitmask decode: find all set error bits for the given prefix
+            bits = [n for n, const in vars(odrive.enums).items()
+                    if n.startswith(prefix) and isinstance(const, int) and (val & const)]
+            sources.append(ErrorModule(name, val, bits))
+
+        check("system", odrv.error, "ODRIVE_ERROR_")
+        check("axis", axis0.error, "AXIS_ERROR_")
+        check("motor", axis0.motor.error, "MOTOR_ERROR_")
+        check("encoder", axis0.encoder.error, "ENCODER_ERROR_")
+        check("controller", axis0.controller.error, "CONTROLLER_ERROR_")
+        check("sensorless", axis0.sensorless_estimator.error, "SENSORLESS_ESTIMATOR_ERROR_")
+
+        report.sources = sources
+    except (DEVICE_EXCEPTIONS, AttributeError):
+        pass
+
     return report
 
 

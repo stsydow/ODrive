@@ -35,9 +35,8 @@ from odrive.enums import (
 )
 from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 
-from errors import format_current, read_error_report
+from errors import DEVICE_EXCEPTIONS, format_current, read_error_report
 from eventlog import LogEntry
-from util import DEVICE_EXCEPTIONS, safe_getattr
 
 logger = logging.getLogger(__name__)
 
@@ -314,7 +313,10 @@ class GuiBackend(QObject):
     # -- helpers -------------------------------------------------------
 
     def _axis(self):
-        return safe_getattr(self.odrive, "axis0")  # only guarded level
+        try:
+            return self.odrive.axis0
+        except DEVICE_EXCEPTIONS:
+            return None
 
     def _read_mode(self):
         axis = self._axis()
@@ -726,9 +728,12 @@ class GuiBackend(QObject):
             self.powerChanged.emit()
 
     def _read_estimates(self):
-        vel = self.odrive.axis0.encoder.vel_estimate
+        axis = self._axis()
+        if axis is None:
+            return
+        vel = axis.encoder.vel_estimate
         new_vel = f"est: {vel:.3f} rps"
-        pos = self.odrive.axis0.encoder.pos_estimate
+        pos = axis.encoder.pos_estimate
         rng = self._position_circular_range()
         if rng is not None:
             pos = pos % rng
@@ -750,7 +755,7 @@ class GuiBackend(QObject):
         return None
 
     def _refresh_errors(self):
-        report = read_error_report(self.odrive, safe_getattr(self.odrive, "axis0"))
+        report = read_error_report(self.odrive)
         self._last_report = report
         key = tuple(sorted((s.name, tuple(s.errors)) for s in report.sources))
         if key and key != self._last_error_key:

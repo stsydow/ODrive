@@ -45,7 +45,6 @@ QtGUI/
 ├── controls.py          # Control settings: gains, limits, input mode, feed-fwd   ✅
 ├── errors.py            # Current error decode + dialog (Phase 2)                ✅
 ├── eventlog.py          # In-memory UI/device event log + viewer (Debug menu)   ✅
-├── util.py              # Shared helpers: safe_getattr, DEVICE_EXCEPTIONS       ✅
 ├── calibration.py       # Calibration wizard + inertia/friction tests (Phase 4)   ⬜ planned
 ├── ruff.toml            # Lint config                                              ✅
 ├── check.sh             # Lint/type-check runner                                   ✅
@@ -106,22 +105,17 @@ Error display (2.1–2.3) is done; the Config Browser (2.4) is not yet implement
 
 #### 2.1 Error Decoding (`errors.py`) ✅
 
-Reuse `odrive.utils.dump_errors()` logic but return structured data:
+Uses direct property access guarded by `DEVICE_EXCEPTIONS` and inlined bitmask
+decoding against `odrive.enums`. Returns structured data:
 
 ```python
 @dataclass
 class ErrorReport:
-    system: int           # ODriveError bitmask
-    axis0: AxisErrors     # axis, motor, encoder, controller, sensorless
     timestamp: float
+    sources: list  # [ErrorModule(name, value, errors: list[str]), ...]
 
-@dataclass
-class AxisErrors:
-    axis: int             # decoded → list of names
-    motor: int
-    encoder: int
-    controller: int
-    sensorless: int
+    @property
+    def any(self) -> bool: ...
 ```
 
 #### 2.2 Current Errors ✅
@@ -181,7 +175,6 @@ QtGUI/
 ├── backend.py       # GuiBackend(QObject) — the single QML-facing API (all device logic)
 ├── errors.py        # read_error_report / format_current (pure logic)
 ├── eventlog.py      # LogEntry / format_log (pure logic)
-├── util.py          # unchanged
 ├── qml/
 │   ├── main.qml            # ApplicationWindow: menubar, control bar, pinned footer,
 │   │                       #   Control Command, Settings tabs (2-column grid)
@@ -408,11 +401,7 @@ except Exception as e:
 
 - **Read failures:** Counted per-read. After 5 consecutive failures (~0.5 s), trigger reconnect.
 - **Write failures:** Shown immediately in status bar. Not fatal — device may be in a transient state.
-- **Calibration errors:** Decoded via `dump_errors()` logic, shown in the wizard step with a hint. User can retry or skip.
-
-**Accessing optional / "maybe-none" values (general rule):** do **not** scatter `try: read … except: pass`. For a genuinely optional attribute read, use the shared `safe_getattr(obj, *attrs, default=None)` helper (in `util.py`), which centrally walks a nested attribute path, catches missing attributes / raised remote reads, and returns `default`; the caller then checks for `None`. Two kinds of reads must stay as **explicit, targeted** `try/except` (never bare `except: pass`):
-- reads that must distinguish error classes (e.g. `ObjectLostError` → reconnect — see `_read_failed`), and
-- writes (they are surfaced, not swallowed).
+- **Calibration errors:** Decoded via standard bitmask logic, shown in the wizard step with a hint. User can retry or skip.
 
 ### 4.2 Feature Availability (Feature Detection)
 

@@ -40,7 +40,6 @@ QtGUI/
 ├── backend.py     # GuiBackend(QObject): the single QML-facing API (all device logic)
 ├── errors.py      # Error decode (read_error_report) + text formatting (pure logic)
 ├── eventlog.py    # In-memory event log + formatting (LogEntry/format_log, pure logic)
-├── util.py        # safe_getattr() guarded reads + DEVICE_EXCEPTIONS
 ├── qml/
 │   ├── main.qml            # ApplicationWindow: menubar, control bar, footer, command, settings
 │   ├── SetpointRow.qml     # reusable Control Command setpoint row (DoubleSpinBox)
@@ -54,7 +53,7 @@ QtGUI/
 
 `GuiBackend` owns all UI state and the device logic. The device root (`self.odrive`) is the
 single source of truth; `axis`/`motor`/`encoder`/`controller` are derived read-only
-properties (`safe_getattr`-backed) so they can never go stale or drift out of sync.
+properties (guarded by `DEVICE_EXCEPTIONS`) so they can never go stale or drift out of sync.
 QML owns presentation only: it binds to `backend.*` properties (updated on the 100 ms
 poll) and invokes `backend.*()` slots for user actions.
 
@@ -113,7 +112,7 @@ so QML accesses it by name everywhere (menus, rows, dialogs). The contract:
 
 | Decision | Rationale |
 |----------|-----------|
-| **Single source of truth** | `self.odrive` is the only stored device ref; axis/motor/encoder/controller are `safe_getattr`-backed properties — removes a five-field state that could drift/stale across reconnects. |
+| **Single source of truth** | `self.odrive` is the only stored device ref; axis/motor/encoder/controller are direct-access properties (guarded by `DEVICE_EXCEPTIONS`) — removes a five-field state that could drift/stale across reconnects. |
 | **QML context property, one `backend` object** | One `QObject` is the whole QML-facing API; no per-field signal plumbing. `setContextProperty` is the runtime bridge (qmllint relies on this, hence `.qmllint.ini` demoting the `unqualified`/`ContextProperties` warnings — a known false positive for injected backends). |
 | **`threading.Thread` + `QTimer.singleShot(0,...)`** | A plain daemon thread plus a posted timer beats `QThread`/`moveToThread` boilerplate for one blocking call, and is equally safe (Qt is thread-safe for `singleShot`). |
 | **`_on_lost` primary, `ObjectLostError` fallback** | `_on_lost` gives instant disconnect notification; a central `ObjectLostError` catch in `updateReadings` catches the (rare) case where it doesn't fire, stops polling and reconnects. |
@@ -129,17 +128,9 @@ so QML accesses it by name everywhere (menus, rows, dialogs). The contract:
 | **Auto-connect/reconnect, no manual button** | Startup auto-connect + loss auto-reconnect; the footer shows state. |
 | **Ctrl+C via `SIG_DFL`** | The Qt event loop is a blocking C++ call, so a Python `KeyboardInterrupt` isn't serviced during `exec()`. Restoring the default SIGINT action terminates reliably from any state. Safe because the GUI is monitor-only. |
 
-## Feature Gating
-
-Parameters the attached firmware doesn't expose are disabled rather than assumed from a
-version string. Settings rows check `backend.hasConfig(base, attr)` on connect and disable
-themselves if missing; the backend's `getConfig`/`setConfig` pass through `DEVICE_EXCEPTIONS`
-and never write when the attribute is absent. `reboot()` is similarly `hasattr`-gated.
-
 ## Exception Handling
 
-Device reads/writes catch only `DEVICE_EXCEPTIONS` and surface writes; optional reads
-use `safe_getattr`. Never blanket-swallow `Exception`. `sys.path` bootstrap for
+Device reads/writes catch only `DEVICE_EXCEPTIONS`. Never blanket-swallow `Exception`. `sys.path` bootstrap for
 `tools/odrive` + `pyfibre` is kept as bare inline `sys.path.insert` calls before imports
 (rules require the bare form — an intermediate assignment trips ruff's E402).
 
