@@ -25,6 +25,7 @@ from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication
 
 from backend import GuiBackend
+from status_backend import StatusBackend
 
 
 def main():
@@ -43,9 +44,12 @@ def main():
     QQuickStyle.setStyle("Fusion")  # desktop Qt Quick Controls style (matches the widget Fusion look)
 
     backend = GuiBackend(verbose=args.verbose)
+    status_backend = StatusBackend()
+    backend.status_backend = status_backend
 
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("backend", backend)
+    engine.rootContext().setContextProperty("statusBackend", status_backend)
     qml_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "qml")
     engine.load(QUrl.fromLocalFile(os.path.join(qml_dir, "main.qml")))
     if not engine.rootObjects():

@@ -18,12 +18,12 @@ fail=0
 echo "==> ruff check ."
 ruff check . || fail=1
 
-echo "==> mypy (main, backend, errors, eventlog)"
+echo "==> mypy (main, backend, status_backend, errors, eventlog)"
 mypy --no-incremental --ignore-missing-imports \
-     main.py backend.py errors.py eventlog.py || fail=1
+     main.py backend.py status_backend.py errors.py eventlog.py || fail=1
 
 echo "==> python -m py_compile (all modules)"
-python3 -m py_compile main.py backend.py errors.py eventlog.py || fail=1
+python3 -m py_compile main.py backend.py status_backend.py errors.py eventlog.py || fail=1
 
 echo "==> qmllint (qml/)"
 if command -v pyside6-qmllint >/dev/null 2>&1; then

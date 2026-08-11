@@ -37,31 +37,7 @@ ApplicationWindow {
     }
 
     // Status footer pinned to the bottom of the window (like QStatusBar).
-    footer: Rectangle {
-        height: 30
-        color: palette.alternateBase
-        border.color: palette.mid
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 8
-            anchors.rightMargin: 8
-            spacing: 14
-            Label { text: backend.connText; font.bold: true; color: backend.connColor }
-            Label { text: backend.stateText }
-            Label {
-                text: backend.errorText
-                color: backend.errorColor
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: errorDialog.show()
-                }
-            }
-            Item { Layout.fillWidth: true }
-            Label { text: backend.vbusText }
-            Label { text: backend.powerText }
-        }
-    }
+    footer: StatusBar {}
 
     ColumnLayout {
         anchors.fill: parent
@@ -72,12 +48,12 @@ ApplicationWindow {
         RowLayout {
             Button {
                 text: "▶ Run (Closed Loop)"
-                enabled: backend.connected
+                enabled: statusBackend.connected
                 onClicked: backend.run()
             }
             Button {
                 text: "■ Stop (Idle)"
-                enabled: backend.connected
+                enabled: statusBackend.connected
                 onClicked: backend.stop()
             }
             Item { Layout.fillWidth: true }
@@ -85,11 +61,11 @@ ApplicationWindow {
             ComboBox {
                 id: stateCombo
                 model: backend.stateNames
-                enabled: backend.connected
+                enabled: statusBackend.connected
             }
             Button {
                 text: "Start"
-                enabled: backend.connected
+                enabled: statusBackend.connected
                 onClicked: backend.startState(stateCombo.currentText)
             }
         }
@@ -101,7 +77,7 @@ ApplicationWindow {
             // Disable the whole subtree (mode/input combos, setpoint rows,
             // Apply) when there is no device; setpoint rows add a finer
             // closed-loop gate via backend.closedLoop below.
-            enabled: backend.connected
+            enabled: statusBackend.connected
             ColumnLayout {
                 anchors.fill: parent
                 spacing: 4
@@ -170,7 +146,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
             title: "Settings"
-            enabled: backend.connected
+            enabled: statusBackend.connected
 
             ColumnLayout {
                 anchors.fill: parent
