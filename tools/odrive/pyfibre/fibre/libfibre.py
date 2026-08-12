@@ -316,7 +316,9 @@ class ObjectPtrCodec:
             return struct.pack("P", value._obj_handle)
         else:
             raise TypeError(
-                f"Expected value of type RemoteObject or None but got '{type(value).__name__}'. An example for a RemoteObject is this expression: odrv0.axis0.controller._input_pos_property"  # noqa: E501
+                f"Expected value of type RemoteObject or None but got '{type(value).__name__}'. "
+                f"An example for a RemoteObject is this expression: "
+                f"odrv0.axis0.controller._input_pos_property"
             )
 
     def deserialize(self, libfibre, buffer):

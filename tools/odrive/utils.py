@@ -182,7 +182,7 @@ def start_liveplotter(get_var_callback):
         while not cancellation_token.is_set():
             try:
                 data = get_var_callback()
-            except Exception as ex:  # noqa: BLE001  (sampling loop keeps running)
+            except Exception as ex:
                 print(str(ex))
                 time.sleep(1)
                 continue
@@ -257,7 +257,7 @@ class BulkCapture:
             while time.monotonic() - start_time < duration:
                 try:
                     data = get_var_callback()
-                except Exception as ex:  # noqa: BLE001  (sampling loop keeps running)
+                except Exception as ex:
                     print(str(ex))
                     print("Waiting 1 second before next data point")
                     time.sleep(1)
@@ -271,7 +271,8 @@ class BulkCapture:
             if achieved_data_rate < (data_rate * 0.9):
                 print(f"Achieved average data rate: {achieved_data_rate}Hz")
                 print(
-                    "If this rate is significantly lower than what you specified, consider lowering it below the achieved value for more consistent sampling."  # noqa: E501
+                    "If this rate is significantly lower than what you specified, consider lowering it "
+                    "below the achieved value for more consistent sampling."
                 )
             self.event.set()  # tell the main thread that the bulk capture is complete
 
@@ -398,7 +399,7 @@ def usb_burn_in_test(get_var_callback, cancellation_token):
             try:
                 get_var_callback()
                 i += 1
-            except Exception as ex:  # noqa: BLE001  (sampling loop keeps running)
+            except Exception as ex:
                 print(str(ex))
                 time.sleep(1)
                 i = 0
@@ -575,7 +576,8 @@ def dump_dma(odrv):
     if odrv.hw_version_major == 3:
         dma_functions = [
             [
-                # https://www.st.com/content/ccc/resource/technical/document/reference_manual/3d/6d/5a/66/b4/99/40/d4/DM00031020.pdf/files/DM00031020.pdf/jcr:content/translations/en.DM00031020.pdf Table 42  # noqa: E501
+                # https://www.st.com/content/ccc/resource/technical/document/reference_manual/3d/6d/5a/66/b4/99/40/d4/
+                # DM00031020.pdf/files/DM00031020.pdf/jcr:content/translations/en.DM00031020.pdf Table 42
                 ["SPI3_RX", "-", "SPI3_RX", "SPI2_RX", "SPI2_TX", "SPI3_TX", "-", "SPI3_TX"],
                 ["I2C1_RX", "-", "TIM7_UP", "-", "TIM7_UP", "I2C1_RX", "I2C1_TX", "I2C1_TX"],
                 ["TIM4_CH1", "-", "I2S3_EXT_RX", "TIM4_CH2", "I2S2_EXT_TX", "I2S3_EXT_TX", "TIM4_UP", "TIM4_CH3"],
@@ -613,7 +615,8 @@ def dump_dma(odrv):
                 ["-", "TIM6_UP", "I2C2_RX", "I2C2_RX", "USART3_TX", "DAC1", "DAC2", "I2C2_TX"],
             ],
             [
-                # https://www.st.com/content/ccc/resource/technical/document/reference_manual/3d/6d/5a/66/b4/99/40/d4/DM00031020.pdf/files/DM00031020.pdf/jcr:content/translations/en.DM00031020.pdf Table 43  # noqa: E501
+                # https://www.st.com/content/ccc/resource/technical/document/reference_manual/3d/6d/5a/66/b4/99/40/d4/
+                # DM00031020.pdf/files/DM00031020.pdf/jcr:content/translations/en.DM00031020.pdf Table 43
                 [
                     "ADC1",
                     "SAI1_A",
@@ -654,7 +657,8 @@ def dump_dma(odrv):
     elif odrv.hw_version_major == 4:
         dma_functions = [
             [
-                # https://www.st.com/resource/en/reference_manual/dm00305990-stm32f72xxx-and-stm32f73xxx-advanced-armbased-32bit-mcus-stmicroelectronics.pdf Table 26  # noqa: E501
+                # https://www.st.com/resource/en/reference_manual/dm00305990-stm32f72xxx-and-stm32f73xxx-
+                # advanced-armbased-32bit-mcus-stmicroelectronics.pdf Table 26
                 ["SPI3_RX", "-", "SPI3_RX", "SPI2_RX", "SPI2_TX", "SPI3_TX", "-", "SPI3_TX"],
                 ["I2C1_RX", "I2C3_RX", "TIM7_UP", "-", "TIM7_UP", "I2C1_RX", "I2C1_TX", "I2C1_TX"],
                 ["TIM4_CH1", "-", "-", "TIM4_CH2", "-", "-", "TIM4_UP", "TIM4_CH3"],
@@ -692,7 +696,8 @@ def dump_dma(odrv):
                 ["-", "TIM6_UP", "I2C2_RX", "I2C2_RX", "USART3_TX", "DAC1", "DAC2", "I2C2_TX"],
             ],
             [
-                # https://www.st.com/resource/en/reference_manual/dm00305990-stm32f72xxx-and-stm32f73xxx-advanced-armbased-32bit-mcus-stmicroelectronics.pdf Table 27  # noqa: E501
+                # https://www.st.com/resource/en/reference_manual/dm00305990-stm32f72xxx-and-stm32f73xxx-
+                # advanced-armbased-32bit-mcus-stmicroelectronics.pdf Table 27
                 [
                     "ADC1",
                     "SAI1_A",

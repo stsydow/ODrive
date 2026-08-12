@@ -238,7 +238,7 @@ def postVal(odrives, keyList, value, argType):
         handle_disconnect(odrv)
     except (AttributeError, ValueError) as ex:
         print("attribute error in postVal (non-fatal):", ex)
-    except (KeyError, TypeError) as ex:
+    except (KeyError, TypeError):
         print("exception in postVal: ", traceback.format_exc())
 
 
@@ -261,7 +261,7 @@ def getVal(odrives, keyList):
         # axis doesn't exist, property not available, etc.
         print("attribute error in getVal (non-fatal):", ex)
         return 0
-    except (KeyError, TypeError) as ex:
+    except (KeyError, TypeError):
         print("exception in getVal: ", traceback.format_exc())
         return 0
 

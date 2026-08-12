@@ -366,7 +366,10 @@ def update_device(device, firmware, logger, cancellation_token):
     if firmware is None:
         if hw_version == (0, 0, 0):
             if dfudev is None:
-                suggestion = "You have to manually flash an up-to-date firmware to make automatic checks work. Run `odrivetool dfu --help` for more info."  # noqa: E501
+                suggestion = (
+                    "You have to manually flash an up-to-date firmware to make automatic checks work. "
+                    "Run `odrivetool dfu --help` for more info."
+                )
             else:
                 suggestion = "Please contact info@odriverobotics.com with your order number for help."
             raise Exception("Cannot check online for new firmware because the board version is unknown. " + suggestion)
@@ -380,11 +383,13 @@ def update_device(device, firmware, logger, cancellation_token):
         print()
         if firmware.fw_version < fw_version:
             print(
-                f"Warning: you are about to flash firmware {get_fw_version_string(firmware.fw_version)} which is older than the firmware on the device ({get_fw_version_string(fw_version)})."  # noqa: E501
+                f"Warning: you are about to flash firmware {get_fw_version_string(firmware.fw_version)} "
+                f"which is older than the firmware on the device ({get_fw_version_string(fw_version)})."
             )
         else:
             print(
-                f"You are about to flash firmware {get_fw_version_string(firmware.fw_version)} which is the same version as the firmware on the device ({get_fw_version_string(fw_version)})."  # noqa: E501
+                f"You are about to flash firmware {get_fw_version_string(firmware.fw_version)} "
+                f"which is the same version as the firmware on the device ({get_fw_version_string(fw_version)})."
             )
         if not odrive.utils.yes_no_prompt("Do you want to flash this firmware anyway?", False):
             raise OperationAbortedException()
@@ -406,7 +411,8 @@ def update_device(device, firmware, logger, cancellation_token):
         if do_backup_config:
             odrive.configuration.backup_config(device, None, logger)
     elif not odrive.utils.yes_no_prompt(
-        "The configuration cannot be backed up because the device is already in DFU mode. The configuration may be lost after updating. Do you want to continue anyway?",  # noqa: E501
+        "The configuration cannot be backed up because the device is already in DFU mode. "
+        "The configuration may be lost after updating. Do you want to continue anyway?",
         True,
     ):
         raise OperationAbortedException()
@@ -542,7 +548,8 @@ def launch_dfu(args, logger, cancellation_token):
 
 
 # Note: the flashed image can be verified using: (0x12000 is the number of bytes to read)
-# $ openocd -f interface/stlink-v2.cfg -f target/stm32f4x.cfg -c init -c flash\ read_bank\ 0\ image.bin\ 0\ 0x12000 -c exit  # noqa: E501
+# $ openocd -f interface/stlink-v2.cfg -f target/stm32f4x.cfg -c init -c flash\ read_bank\ 0\ \
+#   image.bin\ 0\ 0x12000 -c exit
 # $ hexdump -C image.bin > image.bin.txt
 #
 # If you compare this with a reference image that was flashed with the STLink, you will see
