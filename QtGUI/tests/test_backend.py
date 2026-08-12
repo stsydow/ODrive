@@ -14,8 +14,8 @@ from backend import INPUT_MODES, MODES_BY_CONTROL, GuiBackend
 def test_initial_state_offline():
     b = GuiBackend(verbose=False)
     b.connectOdrive = lambda: None  # don't spawn discovery thread
-    assert b.connected is False
-    assert "Offline" in b.connText
+    assert b.status_backend.connected is False
+    assert "Offline" in b.status_backend.connText
     b.update_timer.stop()
 
 
@@ -83,7 +83,7 @@ def test_config_api_read_write_gate(backend):
 
 
 def test_errors_text_no_errors(backend):
-    backend._refresh_errors()
+    backend.updateReadings()
     assert backend.errorsText == "No errors."
 
 

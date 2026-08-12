@@ -32,7 +32,7 @@ Window {
             Item { Layout.fillWidth: true }
             Button {
                 text: "Clear Errors"
-                enabled: backend.connected
+                enabled: statusBackend.connected
                 onClicked: backend.clearErrors()
             }
             Button {

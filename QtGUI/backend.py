@@ -37,7 +37,7 @@ from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 
 from errors import DEVICE_EXCEPTIONS
 from eventlog import LogEntry
-from status_backend import STATE_MAP
+from status_backend import STATE_MAP, StatusBackend
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ class GuiBackend(QObject):
     def __init__(self, verbose=False):
         super().__init__()
         self.odrive = None  # single source of truth; sub-objects derived per use
-        self.status_backend = None
+        self.status_backend = StatusBackend(self)
         self._connecting = False
         self._last_synced_mode = None
         self._verbose = verbose

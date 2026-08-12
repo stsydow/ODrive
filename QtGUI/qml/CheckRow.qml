@@ -33,9 +33,9 @@ RowLayout {
     }
 
     Connections {
-        target: backend
+        target: statusBackend
         function onConnChanged() {
-            if (backend.connected)
+            if (statusBackend.connected)
                 control.sync()
         }
     }

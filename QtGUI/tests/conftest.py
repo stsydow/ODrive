@@ -154,18 +154,18 @@ def backend(mock_device, qapp):
     b = GuiBackend()
     b.connectOdrive = lambda: None  # never spawn the discovery thread
     b.odrive = mock_device
-    b._connected = True
+    b.status_backend.set_conn("\u25cf Online", "green", True)
     b._input_mode_model_for(2)
-    b.connChanged.emit()
     yield b
     b.update_timer.stop()
 
 
 @pytest.fixture
 def qml(backend):
-    """Load qml/main.qml with `backend` as the context property."""
+    """Load qml/main.qml with `backend` + `statusBackend` as context properties."""
     eng = QQmlApplicationEngine()
     eng.rootContext().setContextProperty("backend", backend)
+    eng.rootContext().setContextProperty("statusBackend", backend.status_backend)
     eng.load(QUrl.fromLocalFile(str(QTGUI / "qml" / "main.qml")))
     assert eng.rootObjects(), "QML failed to load"
     yield eng

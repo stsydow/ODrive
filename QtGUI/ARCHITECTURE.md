@@ -40,6 +40,7 @@ QtGUI/
 ├── backend.py     # GuiBackend(QObject): the single QML-facing API (all device logic)
 ├── errors.py      # Error decode (read_error_report) + text formatting (pure logic)
 ├── eventlog.py    # In-memory event log + formatting (LogEntry/format_log, pure logic)
+├── status_backend.py # StatusBackend(QObject): status-footer state (conn/state/errors/VBus/Power)
 ├── qml/
 │   ├── main.qml            # ApplicationWindow: menubar, control bar, footer, command, settings
 │   ├── SetpointRow.qml     # reusable Control Command setpoint row (DoubleSpinBox)
@@ -63,7 +64,7 @@ poll) and invokes `backend.*()` slots for user actions.
 App start ─ QTimer.singleShot(500ms) ─▶ connectOdrive()
                 └─ threading.Thread(_connect_worker) ─▶ odrive.find_any()  (blocks)
                      ├─ success ─▶ _on_connected(): store odrive, register _on_lost,
-                     │              enable UI (emit connChanged)
+                     │              enable UI (status backend -> Online)
                      └─ failure  ─▶ _on_connect_failed(): retry after 1s
 
 Device lost (USB unplug / reboot)
@@ -89,13 +90,15 @@ Qt objects (the QML window and the backend) are only ever touched from the main 
 ## QML ↔ Backend bridge
 
 `backend` is registered as a context property (`engine.rootContext().setContextProperty("backend", ...)`),
-so QML accesses it by name everywhere (menus, rows, dialogs). The contract:
+so QML accesses it by name everywhere (menus, rows, dialogs); a second context property
+`statusBackend` (owned by `GuiBackend`) backs the status footer. The contract:
 
-- **Properties** — connection (`connected`, `connText`, `connColor`), status footer
-  (`stateText`, `errorText`, `errorColor`, `vbusText`, `powerText`), control command
-  (`currentMode`, `inputModes`, `currentInputMode`, three setpoint values, two estimate
-  labels), and `closedLoop` (drives setpoint gating). Each has a notify signal so QML
-  bindings re-evaluate only when the value changes.
+- **Properties** — connection + status footer (`connected`, `connText`, `connColor`,
+  `stateText`, `errorText`, `errorColor`, `vbusText`, `powerText`) live on the
+  `statusBackend` context property; control command (`currentMode`, `inputModes`,
+  `currentInputMode`, three setpoint values, two estimate labels) and `closedLoop`
+  (drives setpoint gating) stay on `backend`. Each has a notify signal so QML bindings
+  re-evaluate only when the value changes.
 - **Notifications** — poll writes only emit when the displayed string/value actually
   changes (avoid re-rendering on every 100 ms tick). Dialog content (`errorsText`,
   `logText`) is a live-bound property updated on the relevant change signal.
@@ -120,7 +123,7 @@ so QML accesses it by name everywhere (menus, rows, dialogs). The contract:
 | **`_on_lost.done()` guard on connect** | If the device dropped before the callback is registered, schedule a fresh reconnect rather than letting `add_done_callback` fire in the connect thread. |
 | **States execute only via button** | Selecting a dropdown item just sets the selection; only Start/Execute actually commands the device — browsing can't accidentally start a calibration. |
 | **Confirmed setpoint apply** | Spinboxes never write on change; the active setpoint goes to the device only on Apply / Enter. |
-| **Two-tier UI gating** | The whole Control Command group is `enabled: backend.connected` (disables mode/input combos offline); setpoint rows additionally gate on `backend.closedLoop` (only while running). Settings tab is gated on `connected`. |
+| **Two-tier UI gating** | The whole Control Command group is `enabled: statusBackend.connected` (disables mode/input combos offline); setpoint rows additionally gate on `backend.closedLoop` (only while running). Settings tab is gated on `statusBackend.connected`. |
 | **Status footer pinned to window bottom** | `ApplicationWindow.footer` holds the composed connect/state/error/VBus/power bar (like the old `QStatusBar`), keeping the main area focused. |
 | **Dialogs as top-level `Window`s** | Error, Event Log, and Device Info are separate Qt Quick `Window`s (native title bar, movable/resizable) sized to their content layout — not frameless popups. File dialogs stay native `QFileDialog`. |
 | **Event log, non-modal + live** | `logEvent` records device-side history (connect/state/mode/setpoint/error/clear) so a run-up to an error is visible, even offline. The viewer binds `backend.logText` live via the `logUpdated` signal (no polling), and works while disconnected. |
