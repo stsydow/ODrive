@@ -61,7 +61,7 @@ if system_desc not in lib_names:
     )
 
 lib_name = lib_names[system_desc]
-search_paths = fibre_cpp_paths + [script_dir]
+search_paths = [*fibre_cpp_paths, script_dir]
 
 lib_path = get_first((os.path.join(p, lib_name) for p in search_paths), os.path.isfile, None)
 
@@ -596,7 +596,7 @@ class Call:
 
     async def cancel():
         # TODO: this doesn't follow the official Python async generator protocol. Should implement aclose() instead.
-        status = libfibre_call(
+        libfibre_call(
             self._func._func_handle,
             byref(self._call_handle),
             kFibreOk,
@@ -689,9 +689,9 @@ class RemoteFunction:
         return MethodType(self, instance) if instance else self
 
     def _dump(self, name):
-        print_arglist = lambda arglist: ", ".join(
-            f"{arg_name}: {codec_name}" for arg_name, codec_name, codec in arglist
-        )
+        def print_arglist(arglist):
+            return ", ".join(f"{arg_name}: {codec_name}" for arg_name, codec_name, codec in arglist)
+
         return "{}({}){}".format(
             name,
             print_arglist(self._inputs),
@@ -1158,7 +1158,7 @@ def _run_event_loop():
     #  - have libfibre_close() report the destruction of all objects
 
     while len(libfibre._objects):
-        libfibre._objects.pop(list(libfibre._objects.keys())[0])._destroy()
+        libfibre._objects.pop(next(iter(libfibre._objects.keys())))._destroy()
     assert len(libfibre.interfaces) == 0
 
     libfibre = None

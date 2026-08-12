@@ -166,7 +166,7 @@ def EvalTrap(Xf, Xi, Vi, Ar, Vr, Dr, Ta, Tv, Td, Tf):
 def graphical_test():
     numRows = 3
     numCols = 5
-    fig, axes = plt.subplots(numRows, numCols)
+    _fig, axes = plt.subplots(numRows, numCols)
     random.seed(3)  # Repeatable tests by using specific seed
     for x in range(numRows * numCols):
         rownow = int(x / numCols)
@@ -184,7 +184,7 @@ def graphical_test():
             Vi = 0
 
         (Ar, Vr, Dr, Ta, Tv, Td, Tf) = PlanTrap(Xf, Xi, Vi, Vmax, Amax, Dmax)
-        (Y, Yd, Ydd, t) = EvalTrap(Xf, Xi, Vi, Ar, Vr, Dr, Ta, Tv, Td, Tf)
+        (Y, Yd, _Ydd, t) = EvalTrap(Xf, Xi, Vi, Ar, Vr, Dr, Ta, Tv, Td, Tf)
 
         # Plotting
         ax1 = axes[rownow, colnow]
@@ -222,7 +222,7 @@ def large_test():
             Vi = 0
 
         (Ar, Vr, Dr, Ta, Tv, Td, Tf) = PlanTrap(Xf, Xi, Vi, Vmax, Amax, Dmax)
-        (Y, Yd, Ydd, t) = EvalTrap(Xf, Xi, Vi, Ar, Vr, Dr, Ta, Tv, Td, Tf)
+        (_Y, _Yd, _Ydd, _t) = EvalTrap(Xf, Xi, Vi, Ar, Vr, Dr, Ta, Tv, Td, Tf)
 
         print()
 

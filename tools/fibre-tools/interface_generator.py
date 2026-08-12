@@ -385,19 +385,23 @@ class InterfaceElement:
         self.interfaces = []
         self.enums = []
 
-    def get_all_attributes(self, stack=[]):
+    def get_all_attributes(self, stack=None):
+        if stack is None:
+            stack = []
         result = OrderedDict()
         for intf in self.implements:
             assert self not in stack
-            result.update(intf.get_all_attributes(stack + [self]))
+            result.update(intf.get_all_attributes([*stack, self]))
         result.update(self.attributes)
         return result
 
-    def get_all_functions(self, stack=[]):
+    def get_all_functions(self, stack=None):
+        if stack is None:
+            stack = []
         result = OrderedDict()
         for intf in self.implements:
             assert self not in stack
-            result.update(intf.get_all_functions(stack + [self]))
+            result.update(intf.get_all_functions([*stack, self]))
         result.update(self.functions)
         return result
 
@@ -466,7 +470,7 @@ def regularize_valuetype(path, name, elem):
 
     if "flags" in elem:  # treat as flags
         bit = 0
-        for k, v in elem["flags"].items():
+        for k, _v in elem["flags"].items():
             elem["flags"][k] = elem["flags"][k] or OrderedDict()
             elem["flags"][k]["name"] = k
             current_bit = elem["flags"][k].get("bit", bit)
@@ -487,7 +491,7 @@ def regularize_valuetype(path, name, elem):
 
     elif "values" in elem:  # treat as enum
         val = 0
-        for k, v in elem["values"].items():
+        for k, _v in elem["values"].items():
             elem["values"][k] = elem["values"][k] or OrderedDict()
             elem["values"][k]["name"] = k
             val = elem["values"][k].get("value", val)
@@ -756,11 +760,13 @@ if args.generate_endpoints:
         interfaces[args.generate_endpoints], "&ep_root", 1
     )  # TODO: make user-configurable
     embedded_endpoint_definitions = [
-        {"name": "", "id": 0, "type": "json", "access": "r"}
-    ] + embedded_endpoint_definitions
+        {"name": "", "id": 0, "type": "json", "access": "r"},
+        *embedded_endpoint_definitions,
+    ]
     endpoints = [
-        {"id": 0, "function": {"fullname": "endpoint0_handler", "in": {}, "out": {}}, "bindings": {}}
-    ] + endpoints
+        {"id": 0, "function": {"fullname": "endpoint0_handler", "in": {}, "out": {}}, "bindings": {}},
+        *endpoints,
+    ]
 else:
     embedded_endpoint_definitions = None
     endpoints = None

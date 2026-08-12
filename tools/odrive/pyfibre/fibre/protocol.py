@@ -2,7 +2,6 @@
 
 import abc
 import struct
-import sys
 import threading
 import time
 import traceback
@@ -10,15 +9,8 @@ import traceback
 # import fibre.utils
 from fibre.utils import Event, TimeoutError, wait_any
 
-if sys.version_info >= (3, 4):
-    ABC = abc.ABC
-else:
-    ABC = abc.ABCMeta("ABC", (), {})
+ABC = abc.ABC
 
-if sys.version_info < (3, 3):
-    from monotonic import monotonic
-
-    time.monotonic = monotonic
 
 SYNC_BYTE = 0xAA
 CRC8_INIT = 0x42
@@ -38,7 +30,7 @@ def calc_crc(remainder, value, polynomial, bitwidth):
 
     # Bring the next byte into the remainder.
     remainder ^= value << (bitwidth - 8)
-    for bitnumber in range(0, 8):
+    for _bitnumber in range(8):
         if remainder & topbit:
             remainder = (remainder << 1) ^ polynomial
         else:
@@ -79,15 +71,11 @@ class ChannelDamagedException(Exception):
     resend of the message might be successful
     """
 
-    pass
-
 
 class ObjectLostError(Exception):
     """
     Raised when the channel is permanently broken
     """
-
-    pass
 
 
 class StreamSource(ABC):
@@ -291,7 +279,7 @@ class Channel(PacketSink):
         packet = struct.pack("<HHH", seq_no, endpoint_id, output_length)
         packet = packet + input
 
-        crc16 = calc_crc16(CRC16_INIT, packet)
+        calc_crc16(CRC16_INIT, packet)
         if endpoint_id & 0x7FFF == 0:
             trailer = PROTOCOL_VERSION
         else:

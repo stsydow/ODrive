@@ -18,8 +18,8 @@ OptionSpec = dict[str, Callable[[str], Any]]  # sphinx.util.typing.OptionSpec fr
 import sys
 
 sys.path.append(os.path.abspath("../tools/fibre-tools"))
-import interface_parser
-import type_registry
+import interface_parser  # noqa: E402
+import type_registry  # noqa: E402
 
 
 def load_file(name, state):
@@ -27,7 +27,7 @@ def load_file(name, state):
 
 
 def add_indent(lines: list[str], indent_depth=1):
-    return [("   " * indent_depth + l) for l in lines]
+    return [("   " * indent_depth + line) for line in lines]
 
 
 def format_docstring(obj, indent_depth=1):
@@ -341,7 +341,7 @@ def find_autosummary_in_lines(lines, filename):
     for line in lines:
         m = autosummary_re.match(line)
         if m:
-            indent, name = m.groups()
+            _indent, name = m.groups()
             path = os.path.join(os.path.dirname(filename), "fibre_types")
             documented.append((path, tuple(name.split("."))))
 

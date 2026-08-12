@@ -9,7 +9,6 @@ odrv = odrive.find_any()
 
 # axes = [odrv.axis0, odrv.axis1];
 axes = [odrv.axis0]
-
 flip_index_search_direction = False
 save_and_reboot = True
 
@@ -88,7 +87,7 @@ for axnum, ax in enumerate(axes):
     # ax.config.startup_closed_loop_control = True
 
 # Everything should be good to go here, so let's save and reboot
-print("")
+print()
 print("All operations successful!")
 if save_and_reboot:
     odrv.save_configuration()

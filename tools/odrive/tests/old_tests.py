@@ -171,7 +171,7 @@ class AxisTest(ABC):
         test_assert_no_error(axis_ctx)
         test_assert_eq(axis_ctx.handle.current_state, AXIS_STATE_IDLE)
         if abs(axis_ctx.handle.encoder.vel_estimate) > 100:
-            logger.warn("axis still in motion, delaying 2 sec...")
+            logger.warning("axis still in motion, delaying 2 sec...")
             time.sleep(2)
         test_assert_eq(axis_ctx.handle.encoder.vel_estimate, 0, range=500)
         test_assert_eq(
@@ -204,7 +204,7 @@ class DualAxisTest(ABC):
         test_assert_eq(axis0_ctx.handle.current_state, AXIS_STATE_IDLE)
         test_assert_eq(axis1_ctx.handle.current_state, AXIS_STATE_IDLE)
         if (abs(axis0_ctx.handle.encoder.vel_estimate) > 100) or (abs(axis1_ctx.handle.encoder.vel_estimate) > 100):
-            logger.warn("some axis still in motion, delaying 2 sec...")
+            logger.warning("some axis still in motion, delaying 2 sec...")
             time.sleep(2)
         test_assert_eq(axis0_ctx.handle.encoder.vel_estimate, 0, range=500)
         test_assert_eq(axis1_ctx.handle.encoder.vel_estimate, 0, range=500)

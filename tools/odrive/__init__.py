@@ -16,7 +16,7 @@ del get_version_str
 import threading
 import time
 
-from .utils import get_serial_number_str, get_serial_number_str_sync
+from .utils import get_serial_number_str, get_serial_number_str_sync  # noqa: F401
 
 default_usb_search_path = (
     "usb:idVendor=0x1209,idProduct=0x0D32,bInterfaceClass=0,bInterfaceSubClass=1,bInterfaceProtocol=0"
@@ -36,7 +36,7 @@ def _start_discovery(path):
 
     async def discovered_object(obj):
         def lost_object(_):
-            idx = [i for i, (o, _) in enumerate(_objects) if o == obj][0]
+            idx = next(i for i, (o, _) in enumerate(_objects) if o == obj)
             _objects.pop(idx)
 
         _objects.append((obj, await get_serial_number_str(obj)))

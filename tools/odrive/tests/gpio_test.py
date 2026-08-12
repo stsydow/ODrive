@@ -70,7 +70,7 @@ class TestInputs:
 
         # Wait for a change in the GPIO states (but at most 3x the expected interval)
         initial_state = odrive.handle.get_gpio_states() & mask
-        for i in range(30):
+        for _i in range(30):
             if odrive.handle.get_gpio_states() & mask != initial_state:
                 break
             time.sleep(0.1 * switch_interval)
@@ -90,7 +90,7 @@ class TestInputs:
         best_match = None
         best_match_val = -1
         for _ in range(len(odrive_gpios)):
-            meas = meas[1:] + [meas[0]]
+            meas = [*meas[1:], meas[0]]
             similarity = sum([m == expected[i] for i, m in enumerate(meas)])
             if similarity > best_match_val:
                 best_match = meas

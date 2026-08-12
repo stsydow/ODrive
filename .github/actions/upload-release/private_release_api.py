@@ -18,7 +18,7 @@ class PrivateReleaseApi:
                     if entry.is_file():
                         yield os.path.join(*prefix, entry.name)
                     else:
-                        yield from _get_file_names(path, prefix + [entry.name])
+                        yield from _get_file_names(path, [*prefix, entry.name])
 
         filenames = sorted(_get_file_names(path, []))
 

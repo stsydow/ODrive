@@ -72,7 +72,7 @@ def rk_step(fun, t, y, f, h, A, B, C, K):
            Equations I: Nonstiff Problems", Sec. II.4.
     """
     K[0] = f
-    for s, (a, c) in enumerate(zip(A[1:], C[1:]), start=1):
+    for s, (a, c) in enumerate(zip(A[1:], C[1:], strict=False), start=1):
         dy = np.dot(K[:s].T, a[:s]) * h
         K[s] = fun(t + c * h, y + dy)
 
@@ -104,7 +104,7 @@ class motor_pmsm_mechanical:
         self.b_v = b_viscous
 
     def diff_eqs(self, t, y, torque):
-        theta = y[0]
+        y[0]
         theta_dot = y[1]
 
         theta_ddot = (1 / self.J) * (torque - self.b_v * theta_dot - self.b_c * sign(theta_dot))
@@ -170,7 +170,7 @@ class motor:
         # inputs are self.V_q, self.V_d, self.T_load
         # state is y, y = [theta, theta_dot, I_d, I_q]
         # set_inputs must be called before this if the inputs have changed.
-        theta = y[0]
+        y[0]
         theta_dot = y[1]
         I_d = y[2]
         I_q = y[3]

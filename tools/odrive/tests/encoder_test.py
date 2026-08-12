@@ -36,7 +36,7 @@ class TestEncoderBase:
             duration=5.0,
         )
 
-        short_period = abs(1 / true_rps) < 5.0
+        assert abs(1 / true_rps) < 5.0
         reverse = true_rps < 0
 
         # encoder.shadow_count
@@ -139,15 +139,10 @@ class TestIncrementalEncoder(TestEncoderBase):
                 ]
 
                 valid_combinations = [
-                    (
-                        encoder,
-                        combination[0].parent,
-                    )
-                    + tuple(combination)
-                    + (None,)
+                    (encoder, combination[0].parent, *tuple(combination), None)
                     for combination in itertools.product(*gpio_conns)
                     if (
-                        (len(set(c.parent for c in combination)) == 1)
+                        (len({c.parent for c in combination}) == 1)
                         and isinstance(combination[0].parent, TeensyComponent)
                     )
                 ]
@@ -215,17 +210,9 @@ class TestSinCosEncoder(TestEncoderBase):
             ]
 
             valid_combinations = [
-                (
-                    odrive.encoders[0],
-                    combination[0].parent,
-                )
-                + tuple(combination)
-                + (None,)
+                (odrive.encoders[0], combination[0].parent, *tuple(combination), None)
                 for combination in itertools.product(*gpio_conns)
-                if (
-                    (len(set(c.parent for c in combination)) == 1)
-                    and isinstance(combination[0].parent, TeensyComponent)
-                )
+                if ((len({c.parent for c in combination}) == 1) and isinstance(combination[0].parent, TeensyComponent))
             ]
 
             yield AnyTestCase(*valid_combinations)
@@ -298,15 +285,10 @@ class TestHallEffectEncoder(TestEncoderBase):
                 ]
 
                 valid_combinations = [
-                    (
-                        encoder,
-                        combination[0].parent,
-                    )
-                    + tuple(combination)
-                    + (None,)
+                    (encoder, combination[0].parent, *tuple(combination), None)
                     for combination in itertools.product(*gpio_conns)
                     if (
-                        (len(set(c.parent for c in combination)) == 1)
+                        (len({c.parent for c in combination}) == 1)
                         and isinstance(combination[0].parent, TeensyComponent)
                     )
                 ]

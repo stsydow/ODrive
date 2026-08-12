@@ -238,6 +238,8 @@ def postVal(odrives, keyList, value, argType):
             pass  # dont support that type yet
     except fibre.ObjectLostError:
         handle_disconnect(odrv)
+    except (AttributeError, ValueError) as ex:
+        print("attribute error in postVal (non-fatal):", ex)
     except Exception:
         print("exception in postVal: ", traceback.format_exc())
 
@@ -257,6 +259,10 @@ def getVal(odrives, keyList):
         return retVal
     except fibre.ObjectLostError:
         handle_disconnect(odrv)
+    except (AttributeError, ValueError) as ex:
+        # axis doesn't exist, property not available, etc.
+        print("attribute error in getVal (non-fatal):", ex)
+        return 0
     except Exception:
         print("exception in getVal: ", traceback.format_exc())
         return 0

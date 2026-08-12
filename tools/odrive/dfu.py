@@ -64,10 +64,7 @@ def populate_sectors(sectors, hexfile):
         # check if any segment from the hexfile overlaps with this sector
         touched = False
         for start, end in hexfile.segments():
-            if start < addr and end > addr:
-                touched = True
-                break
-            elif start >= addr and start < addr + size:
+            if (start < addr and end > addr) or (start >= addr and start < addr + size):
                 touched = True
                 break
 

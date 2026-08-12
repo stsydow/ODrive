@@ -12,8 +12,6 @@ class TestClosedLoopControlBase:
     Base class for close loop control tests.
     """
 
-    pass
-
 
 class TestClosedLoopControl(TestClosedLoopControlBase):
     """

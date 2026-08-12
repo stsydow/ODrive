@@ -3,7 +3,7 @@ import struct
 
 
 def named(tuple, names):
-    return dict(zip(names, tuple))
+    return dict(zip(names, tuple, strict=False))
 
 
 def parse(fmt, data, names):
@@ -17,13 +17,13 @@ def fileunpack(f, fmt, names):
 
 class DfuFile:
     def __init__(self, path):
-        self.targets = list()
-        self.devInfo = dict()
+        self.targets = []
+        self.devInfo = {}
 
         try:
             dfufile = open(path, "rb")
-        except:
-            raise argparse.ArgumentTypeError("Could not open file %r" % path)
+        except Exception:
+            raise argparse.ArgumentTypeError(f"Could not open file {path!r}") from None
 
         with dfufile:
             header = fileunpack(dfufile, "<5sBLB", ("signature", "version", "size", "targets"))
@@ -33,7 +33,7 @@ class DfuFile:
             if header["version"] != 1:
                 raise argparse.ArgumentTypeError("Unsupport DfuSe file version")
 
-            for t in range(header["targets"]):
+            for _t in range(header["targets"]):
                 target_prefix = fileunpack(
                     dfufile, "<6sBL255sLL", ("signature", "alternate", "named", "name", "size", "elements")
                 )
@@ -43,10 +43,10 @@ class DfuFile:
                 target = {
                     "name": target_prefix["name"].decode("ascii").rstrip("\0"),
                     "alternate": target_prefix["alternate"],
-                    "elements": list(),
+                    "elements": [],
                 }
 
-                for e in range(target_prefix["elements"]):
+                for _e in range(target_prefix["elements"]):
                     element_prefix = fileunpack(dfufile, "<LL", ("address", "size"))
                     element = {"address": element_prefix["address"], "data": dfufile.read(element_prefix["size"])}
                     target["elements"].append(element)

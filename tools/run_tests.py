@@ -8,6 +8,8 @@
 # 2. ./run_tests.py
 
 import argparse
+import functools
+import operator
 import os
 import threading
 import traceback
@@ -119,7 +121,7 @@ for odrv_idx, odrv_yaml in enumerate(test_rig_yaml["odrives"]):
 # Build a dictionary of axis test contexts by name (e.g. odrive0.axis0)
 axes_by_name = {}
 for odrv_ctx in odrives_by_name.values():
-    for axis_idx, axis_ctx in enumerate(odrv_ctx.axes):
+    for _axis_idx, axis_ctx in enumerate(odrv_ctx.axes):
         if axis_ctx.name not in args.ignore:
             axes_by_name[axis_ctx.name] = axis_ctx
 
@@ -158,7 +160,9 @@ try:
 
             def axis_test_thread(axis_name):
                 # Get all axes that are mechanically coupled with the axis specified by axis_name
-                conflicting_axes = sum([c for c in couplings if (axis_name in [a.name for a in c])], [])
+                conflicting_axes = functools.reduce(
+                    operator.iadd, [c for c in couplings if (axis_name in [a.name for a in c])], []
+                )
                 # Remove duplicates
                 conflicting_axes = list(set(conflicting_axes))
                 # Acquire lock for all conflicting axes
@@ -176,7 +180,7 @@ try:
                             raise PreconditionsNotMet()
                         test.run_test(axis_ctx, logger.indent(f"  {axis_name}: "))
                     else:
-                        logger.warn(f"- skipping {type(test).__name__} on {axis_name}")
+                        logger.warning(f"- skipping {type(test).__name__} on {axis_name}")
                 except:
                     app_shutdown_token.set()
                     raise
@@ -209,7 +213,7 @@ try:
                             raise PreconditionsNotMet()
                         test.run_test(coupled_axes[0], coupled_axes[1], logger.indent(f"  {coupling_name}: "))
                     else:
-                        logger.warn(f"- skipping {type(test).__name__} on {coupling_name}...")
+                        logger.warning(f"- skipping {type(test).__name__} on {coupling_name}...")
                 except:
                     app_shutdown_token.set()
                     raise
@@ -225,7 +229,7 @@ try:
             )
 
         else:
-            logger.warn(f"ignoring unknown test type {type(test)}")
+            logger.warning(f"ignoring unknown test type {type(test)}")
 
 except:
     logger.error(traceback.format_exc())

@@ -5,7 +5,7 @@ msgList = []
 nodes = [can.Node("Master")]
 buses = [can.Bus("ODrive", None, 100000)]
 
-for axisID in range(0, 8):
+for axisID in range(8):
     newNode = can.Node(f"ODrive_Axis{axisID}")
     nodes.append(newNode)
 

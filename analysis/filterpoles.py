@@ -71,7 +71,7 @@ if do_PLL:
         vel = X[1]
 
         pos_err = pos_ref - pos
-        vel_err = vel_ref - vel
+        vel_ref - vel
 
         pos_dot = vel + Kp * pos_err
         vel_dot = Ki * pos_err

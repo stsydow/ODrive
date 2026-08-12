@@ -52,11 +52,6 @@ import sys
 
 from setuptools import setup
 
-if sys.version_info < (3, 3):
-    import exceptions
-
-    PermissionError = exceptions.OSError
-
 creating_package = "sdist" in sys.argv
 
 # Load version from Git tag

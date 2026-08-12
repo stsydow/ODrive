@@ -12,7 +12,7 @@ except ImportError as ex:
     print(str(ex), file=sys.stderr)
     print("Note that there are new compile-time dependencies since around v0.5.1.", file=sys.stderr)
     print(
-        "Check out https://github.com/odriverobotics/ODrive/blob/devel/docs/developer-guide.md#prerequisites for details.",
+        "Check out https://github.com/odriverobotics/ODrive/blob/devel/docs/developer-guide.md#prerequisites for details.",  # noqa: E501
         file=sys.stderr,
     )
     exit(1)

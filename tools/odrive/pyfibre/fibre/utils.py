@@ -12,14 +12,8 @@ try:
 except ImportError:
     print("Could not init terminal features.")
     sys.stdout.flush()
-    pass
 
-if sys.version_info < (3, 3):
-
-    class TimeoutError(Exception):
-        pass
-else:
-    TimeoutError = TimeoutError
+TimeoutError = TimeoutError
 
 
 ## Threading utils ##
@@ -100,7 +94,7 @@ class Event:
             if not self.wait(timeout=timeout):
                 self.set()
 
-        threading.Thread(target=delayed_trigger)
+        t = threading.Thread(target=delayed_trigger)
         t.daemon = True
         t.start()
 

@@ -5,8 +5,8 @@ encoder_cpr = 2400
 stator_slots = 12
 pole_pairs = 7
 
-N = data.size
-fft = np.fft.rfft(data)
+N = data.size  # noqa: F821  (analysis scratch: `data` is loaded in the interpreter)
+fft = np.fft.rfft(data)  # noqa: F821
 freq = np.fft.rfftfreq(N, d=1.0 / encoder_cpr)
 
 harmonics = [0]
@@ -25,7 +25,7 @@ interp_data = np.fft.irfft(fft_sparse)
 
 # plt.figure()
 plt.subplot(3, 1, 1)
-plt.plot(data, label="raw")
+plt.plot(data, label="raw")  # noqa: F821
 plt.plot(interp_data, label="selected harmonics IFFT")
 plt.title("cogging map")
 plt.xlabel("counts")

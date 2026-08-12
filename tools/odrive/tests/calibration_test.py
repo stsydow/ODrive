@@ -62,7 +62,6 @@ class TestDisconnectedMotorCalibration:
                 yield (axis, None)
 
     def run_test(self, axis_ctx: ODriveAxisComponent, logger: Logger):
-        axis = axis_ctx.handle
 
         # reset old calibration values
         axis_ctx.handle.motor.config.phase_resistance = 0.0
@@ -89,7 +88,6 @@ class TestEncoderDirFind:
     def run_test(
         self, axis_ctx: ODriveAxisComponent, motor_ctx: MotorComponent, enc_ctx: EncoderComponent, logger: Logger
     ):
-        axis = axis_ctx.handle
         time.sleep(1.0)  # wait for PLLs to stabilize
 
         # Set motor calibration values
@@ -125,7 +123,6 @@ class TestEncoderOffsetCalibration:
     def run_test(
         self, axis_ctx: ODriveAxisComponent, motor_ctx: MotorComponent, enc_ctx: EncoderComponent, logger: Logger
     ):
-        axis = axis_ctx.handle
         time.sleep(1.0)  # wait for PLLs to stabilize
 
         # Set motor calibration values
@@ -177,7 +174,6 @@ class TestEncoderIndexSearch:
         z_gpio: LinuxGpioComponent,
         logger: Logger,
     ):
-        axis = axis_ctx.handle
         cpr = int(enc_ctx.yaml["cpr"])
 
         z_gpio.config(output=True)

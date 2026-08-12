@@ -102,7 +102,7 @@ def restore_config(device, filename, logger):
     for error in errors:
         logger.info(error)
     if errors:
-        logger.warn("Some of the configuration could not be restored.")
+        logger.warning("Some of the configuration could not be restored.")
 
     try:
         device.save_configuration()

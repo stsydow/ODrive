@@ -125,7 +125,7 @@ class TestOffboardTempSensors:
         axis.parent.save_config_and_reboot()
 
         data = record_log(lambda: [axis.handle.motor.motor_thermistor.temperature], duration=5.0)
-        slope, offset, fitted_curve = fit_sawtooth(data[:, (0, 1)], 20, 100)
+        slope, _offset, fitted_curve = fit_sawtooth(data[:, (0, 1)], 20, 100)
         test_assert_eq(slope, (100 - 20) / 1.0, accuracy=0.005)
         test_curve_fit(
             data[:, (0, 1)], fitted_curve, max_mean_err=3.0, inlier_range=6.0, max_outliers=len(data[:, 0]) * 0.02

@@ -28,7 +28,7 @@ class NamespaceInfo:
             path = path[1:]
         return ns
 
-    def add_type(self, type: "TypeInfo", py_val_type: tuple[str] = None, py_ref_type: tuple[str] = None):
+    def add_type(self, type: "TypeInfo", py_val_type: tuple[str] | None = None, py_ref_type: tuple[str] | None = None):
         self.types[type.name] = type
         self.registry._type_parents[type] = self
         if py_val_type is not None:
@@ -99,13 +99,17 @@ class TypeRegistry:
         self._py_ref_type_names = {}  # maps TypeInfo objects to Python type paths
         self._py_val_type_names = {}  # maps TypeInfo objects to Python type paths
 
-    def ns_from_name(self, ns_name: str, scope=[()]):
+    def ns_from_name(self, ns_name: str, scope=None):
+        if scope is None:
+            scope = [()]
         if ns_name.startswith(":"):
             ns_name = ns_name[1:]
             scope = [()]
         return self.ns_from_path(tuple(ns_name.split(".")), scope)
 
-    def ns_from_path(self, ns_path: tuple[str], scope=[()]):
+    def ns_from_path(self, ns_path: tuple[str], scope=None):
+        if scope is None:
+            scope = [()]
         for path in scope:
             for i in range(len(path) + 1):
                 partial_path = path[: (len(path) - i)]
@@ -115,13 +119,17 @@ class TypeRegistry:
 
         raise NotFoundException(self, ns_path, scope)
 
-    def type_from_name(self, type_name: str, kind, scope=[()]):
+    def type_from_name(self, type_name: str, kind, scope=None):
+        if scope is None:
+            scope = [()]
         if type_name.startswith(":"):
             type_name = type_name[1:]
             scope = [()]
         return self.type_from_path(tuple(type_name.split(".")), kind, scope)
 
-    def type_from_path(self, type_path: tuple[str], kind, scope=[()]):
+    def type_from_path(self, type_path: tuple[str], kind, scope=None):
+        if scope is None:
+            scope = [()]
         ns_path = type_path[:-1]
 
         ns_candidates = set()
@@ -139,11 +147,13 @@ class TypeRegistry:
 
         raise NotFoundException(self, type_path, scope)
 
-    def get_class(self, name: str, scope=[()]) -> ClassInfo:
+    def get_class(self, name: str, scope=None) -> ClassInfo:
         """
         Returns the specified class.
         Raises an exception if the interface cannot be found.
         """
+        if scope is None:
+            scope = [()]
         return self.type_from_name(name, ClassInfo, scope)
 
     def resolve_all(self):
@@ -172,10 +182,10 @@ class TypeRegistry:
         type_ns_path = self.get_containing_ns(type).get_path()
 
         def get_py_full_ns_name(ns_path):
-            return (ns_path[0].replace(".", "_").lower(),) + ns_path[1:]
+            return (ns_path[0].replace(".", "_").lower(), *ns_path[1:])
 
         py_decl_path = get_py_full_ns_name(decl_ns_path)
-        py_type_path = self._py_ref_type_names.get(type, get_py_full_ns_name(type_ns_path) + (type.name,))
+        py_type_path = self._py_ref_type_names.get(type, (*get_py_full_ns_name(type_ns_path), type.name))
 
         while len(py_decl_path) > 0 and len(py_type_path) > 1 and py_decl_path[0] == py_type_path[0]:
             py_decl_path = py_decl_path[1:]
@@ -191,10 +201,10 @@ class TypeRegistry:
         type_ns_path = self.get_containing_ns(type).get_path()
 
         def get_py_full_ns_name(ns_path):
-            return (ns_path[0].replace(".", "_").lower(),) + ns_path[1:]
+            return (ns_path[0].replace(".", "_").lower(), *ns_path[1:])
 
         py_decl_path = get_py_full_ns_name(decl_ns_path)
-        py_type_path = self._py_val_type_names.get(type, get_py_full_ns_name(type_ns_path) + (type.name,))
+        py_type_path = self._py_val_type_names.get(type, (*get_py_full_ns_name(type_ns_path), type.name))
 
         while len(py_decl_path) > 0 and len(py_type_path) > 1 and py_decl_path[0] == py_type_path[0]:
             py_decl_path = py_decl_path[1:]

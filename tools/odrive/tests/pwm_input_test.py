@@ -64,12 +64,7 @@ class TestPwmInput:
             for test_case in test_cases:
                 yield AnyTestCase(
                     *[
-                        (odrive,)
-                        + tuple(test_case[:-1])
-                        + (
-                            teensy_gpio,
-                            tf,
-                        )
+                        (odrive, *tuple(test_case[:-1]), teensy_gpio, tf)
                         for teensy_gpio, tf in testrig.get_connected_components(test_case[-1], TeensyGpio)
                     ]
                 )
@@ -101,7 +96,7 @@ class TestPwmInput:
         data = record_log(lambda: [odrive.handle.axis0.controller.input_pos], duration=5.0)
 
         full_scale = max_val - min_val
-        slope, offset, fitted_curve = fit_sawtooth(data, min_val, max_val)
+        slope, _offset, fitted_curve = fit_sawtooth(data, min_val, max_val)
         test_assert_eq(slope, full_scale / 1.0, accuracy=0.001)
         test_curve_fit(
             data,

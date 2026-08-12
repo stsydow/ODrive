@@ -120,7 +120,7 @@ class TestAnalogInput:
         # Expect mean error to be at most 2% (of the full scale).
         # Expect there to be less than 2% outliers, where an outlier is anything that is more than 5% (of full scale) away from the expected value.
         full_range = abs(max_val - min_val)
-        slope, offset, fitted_curve = fit_sawtooth(data, min_val, max_val, sigma=30)
+        slope, _offset, fitted_curve = fit_sawtooth(data, min_val, max_val, sigma=30)
         test_assert_eq(slope, (max_val - min_val) / period, accuracy=0.005)
         test_curve_fit(
             data,

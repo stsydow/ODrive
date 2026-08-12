@@ -97,7 +97,7 @@ class DfuDevice:
         self.control_msg(DFU_REQUEST_RECEIVE, DFU_ABORT, 0, 0)
 
     def set_address(self, ap):
-        return self.dnload(0x0, [0x21] + address_to_4bytes(ap))
+        return self.dnload(0x0, [33, *address_to_4bytes(ap)])
 
     def unprotect(self):
         alt = [a for a in self.alternates() if a[0].startswith("@Device Feature/")]
@@ -116,7 +116,7 @@ class DfuDevice:
         return self.upload(block + 2, size)
 
     def erase(self, pa):
-        return self.dnload(0x0, [0x41] + address_to_4bytes(pa))
+        return self.dnload(0x0, [65, *address_to_4bytes(pa)])
 
     def leave(self):
         return self.dnload(0x0, [])  # Just send an empty data.
@@ -129,7 +129,7 @@ class DfuDevice:
 
         try:
             status = self.get_status()
-        except:
+        except Exception:  # noqa: BLE001
             time.sleep(0.100)
             status = self.get_status()
 

@@ -18,7 +18,7 @@ from type_info import (
     ResolvedTypeRef,
     TypeInfo,
 )
-from type_registry import TypeNameRef, TypeRegistry
+from type_registry import NamespaceInfo, TypeNameRef, TypeRegistry
 
 
 class SourceInfo(NamedTuple):
@@ -45,9 +45,9 @@ class SafeLineLoader(yaml.SafeLoader):
     def construct_mapping(self, node, deep=False):
         self.flatten_mapping(node)
         for key_node, value_node in node.value:
-            value_node.path = node.path + [key_node.value]
+            value_node.path = [*node.path, key_node.value]
         pairs = self.construct_pairs(node)
-        if len(set([k for k, v in pairs])) != len(pairs):
+        if len({k for k, v in pairs}) != len(pairs):
             raise Exception("duplicate keys")
         # import ipdb; ipdb.set_trace()
         self.linenos[".".join(node.path)] = SourceInfo(self.document_name, node.__line__)

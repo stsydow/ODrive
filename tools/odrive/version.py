@@ -57,7 +57,7 @@ def get_version_str(git_only=False, is_post_release=False, bump_rev=False, relea
     # Try to read the version.txt file that is generated during
     # the packaging step
     version_file_path = os.path.join(script_dir, "version.txt")
-    if os.path.exists(version_file_path) and git_only == False:
+    if os.path.exists(version_file_path) and not git_only:
         with open(version_file_path) as version_file:
             return version_file.readline().rstrip("\n")
 
@@ -96,7 +96,7 @@ def setup_udev_rules(logger):
         return
     if os.getuid() != 0:
         if logger:
-            logger.warn("you should run this as root, otherwise it will probably not work")
+            logger.warning("you should run this as root, otherwise it will probably not work")
     with open("/etc/udev/rules.d/91-odrive.rules", "w") as file:
         file.write(
             'SUBSYSTEM=="usb", ATTR{idVendor}=="1209", ATTR{idProduct}=="0d3[0-9]", MODE="0666", ENV{ID_MM_DEVICE_IGNORE}="1"\n'

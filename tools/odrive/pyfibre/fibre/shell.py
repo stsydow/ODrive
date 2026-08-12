@@ -41,7 +41,7 @@ def lost_device(interactive_name, shutdown_token, logger):
     a message.
     """
     if not shutdown_token[0]:
-        logger.warn(f"Oh no {interactive_name} disappeared")
+        logger.warning(f"Oh no {interactive_name} disappeared")
 
 
 def get_user_name(interactive_variables, obj):
@@ -64,7 +64,7 @@ def get_user_name(interactive_variables, obj):
                     )
                 )
 
-    return "anonymous_remote_object_" + str(self._obj_handle)
+    return "anonymous_remote_object_" + str(obj._obj_handle)
 
 
 def launch_shell(args, mount, interactive_variables, print_banner, print_help, logger):
@@ -84,9 +84,10 @@ def launch_shell(args, mount, interactive_variables, print_banner, print_help, l
 
     # Connect to device
     with fibre.Domain(args.path) as domain:
-        on_discovery = lambda dev: discovered_device(
-            dev, interactive_variables, discovered_devices, mount, shutdown_token, logger
-        )
+
+        def on_discovery(dev):
+            return discovered_device(dev, interactive_variables, discovered_devices, mount, shutdown_token, logger)
+
         discovery = domain.run_discovery(on_discovery)
 
         # Check if IPython is installed
@@ -108,7 +109,9 @@ def launch_shell(args, mount, interactive_variables, print_banner, print_help, l
         # If IPython is installed, embed IPython shell, otherwise embed regular shell
         if use_ipython:
             # Override help function # pylint: disable=W0612
-            help = lambda: print_help(args, len(discovered_devices) > 0)
+            def help():
+                return print_help(args, len(discovered_devices) > 0)
+
             # to fix broken "%run -i script.py"
             locals()["__name__"] = globals()["__name__"]
             console = IPython.terminal.embed.InteractiveShellEmbed(banner1="")
@@ -141,7 +144,9 @@ def launch_shell(args, mount, interactive_variables, print_banner, print_help, l
             import code
 
             console = code.InteractiveConsole(locals=interactive_variables)
-            interact = lambda: console.interact(banner="")
+
+            def interact():
+                return console.interact(banner="")
 
             # Catch ObjectLostError (since disconnect is not alway an error)
             console.runcode("import sys")

@@ -26,7 +26,7 @@ class ACMotor:
     """
 
     # parameters: (name, range)
-    parameter_definitions = [
+    parameter_definitions = [  # noqa: RUF012
         ("stator_inductance", (0, np.inf), "H"),  # aka l_s, [Henry]
         ("stator_resistance", (0, np.inf), "ohm"),  # aka r_s, [Ohm]
         ("rotor_inductance", (0, np.inf), "H"),  # aka l_r [Henry]
@@ -34,15 +34,15 @@ class ACMotor:
         ("mutual_inductance_factor", (0, 1.0), ""),  # [unitless] = l_m**2 / (l_s * l_r)
     ]
     # parameter index lookup
-    pl = {r[0]: i for i, r in enumerate(parameter_definitions)}
+    pl = {r[0]: i for i, r in enumerate(parameter_definitions)}  # noqa: RUF012
 
     # states: (name, initial_value)
-    state_definitions = [
+    state_definitions = [  # noqa: RUF012
         ("stator_current", 0.0),  # aka i_s, [A]
         ("rotor_flux", 0.0),  # aka Phi_r, [Wb]
     ]  # complex numbers
     # state index lookup
-    sl = {r[0]: i for i, r in enumerate(state_definitions)}
+    sl = {r[0]: i for i, r in enumerate(state_definitions)}  # noqa: RUF012
 
     def __init__(self, params):
         self.params = params
@@ -175,7 +175,7 @@ t = np.arange(4096) / 8000.0
 voltage_step = 1.0
 if USE_TEST_DATA:
     with open(filename) as fp:
-        test_response = np.array([float(x) for x in fp.readlines()])
+        test_response = np.array([float(x) for x in fp])
 else:
     test_response = None
 
@@ -230,7 +230,7 @@ if DO_FITTING:
     optiresult = least_squares(
         get_residuals,
         inital_parameters,
-        bounds=list(zip(*[x[1] for x in ACMotor.parameter_definitions])),
+        bounds=list(zip(*[x[1] for x in ACMotor.parameter_definitions], strict=False)),
         x_scale="jac",
         diff_step=1e-2
         * np.array(

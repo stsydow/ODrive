@@ -129,7 +129,7 @@ if __name__ == "__main__":
                     # print('{:06.2f} clocks : {}'.format((v * 10500) / total, k))
                 start = cur
                 print(f"{total} Samples")
-                print("")
+                print()
                 # total = 0
                 # countmap = { }
                 # pcmap = { }

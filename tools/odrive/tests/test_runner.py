@@ -38,7 +38,8 @@ class TestFailed(Exception):
 
 
 def test_assert_eq(observed, expected, range=None, accuracy=None):
-    sign = lambda x: 1 if x >= 0 else -1
+    def sign(x):
+        return 1 if x >= 0 else -1
 
     # Comparision with absolute range
     if range is not None:
@@ -98,7 +99,7 @@ def is_list_like(arg):
 
 
 def all_unique(lst):
-    seen = list()
+    seen = []
     return not any(i in seen or seen.append(i) for i in lst)
 
 
@@ -115,7 +116,7 @@ def record_log(data_getter, duration=5.0):
     data = []
     start = time.monotonic()
     while time.monotonic() - start < duration:
-        data.append((time.monotonic() - start,) + tuple(data_getter()))
+        data.append((time.monotonic() - start, *tuple(data_getter())))
     return np.array(data)
 
 
@@ -129,7 +130,9 @@ def save_log(data, id=None):
 
 
 def fit_line(data):
-    func = lambda x, a, b: x * a + b
+    def func(x, a, b):
+        return x * a + b
+
     slope, offset = scipy.optimize.curve_fit(func, data[:, 0], data[:, 1], [1.0, 0])[0]
     return slope, offset, func(data[:, 0], slope, offset)
 
@@ -143,7 +146,8 @@ def fit_sawtooth(data, min_val, max_val, sigma=10):
     """
 
     # Sawtooth function with free parameters for period and x-shift
-    func = lambda x, a, b: np.mod(a * x + b, max_val - min_val) + min_val
+    def func(x, a, b):
+        return np.mod(a * x + b, max_val - min_val) + min_val
 
     # Fit period and x-shift
     mid_point = (min_val + max_val) / 2
@@ -245,7 +249,7 @@ class SafeTerminator:
                 self.logger.error(f"can't put axis {axis_ctx} into idle")
         # TODO: review if erase_configuration is safe during active PWM
         time.sleep(0.005)
-        for axis_ctx in set(axis for axis in idle_axes):
+        for axis_ctx in set(idle_axes):
             axis_ctx.parent.erase_config_and_reboot()
 
 
@@ -723,13 +727,13 @@ class TestRig:
             elif component_yaml["type"] == "lpf":
                 add_component(component_yaml["name"], LowPassFilterComponent(self))
             else:
-                logger.warn("test rig has unsupported component " + component_yaml["type"])
+                logger.warning("test rig has unsupported component " + component_yaml["type"])
                 continue
 
         # List of disjunct sets, where each set holds references of the mutually connected components
         self.connections = []
         for connection_yaml in yaml["connections"]:
-            self.connections.append(set(self.components_by_name[name] for name in connection_yaml))
+            self.connections.append({self.components_by_name[name] for name in connection_yaml})
         self.connections = list(disjoint_sets(self.connections))
 
         # Dict for fast lookup of the connection sets for each port
@@ -777,13 +781,13 @@ class TestRig:
         """
         assert mode in ["direct", "indirect"]
 
-        net1 = self.net_by_component.get(component1, set([component1]))
+        net1 = self.net_by_component.get(component1, {component1})
         if component2 in net1:
             return True, None  # The components are directly connected
         if mode == "direct":
             return False, None
 
-        net2 = self.net_by_component.get(component2, set([component2]))
+        net2 = self.net_by_component.get(component2, {component2})
 
         possible_test_fixtures = []
 
@@ -822,10 +826,10 @@ class TestRig:
         """
         if isinstance(component, str):
             component = self.components_by_name[component]
-        result = self.net_by_component.get(component, set([component]))
+        result = self.net_by_component.get(component, {component})
         return [c for c in result if (c != component)]
 
-    def get_connected_components(self, src: dict | tuple[Component | str, bool], comp_type: type = None):
+    def get_connected_components(self, src: dict | tuple[Component | str, bool], comp_type: type | None = None):
         """
         Returns all components that are either directly or indirectly (through a
         Teensy) connected to the specified component(s).
@@ -932,8 +936,8 @@ def render_html_summary(status, test_results, output_file):
 
     with open(os.path.join(os.path.dirname(__file__), "results.html.j2")) as fp:
         env = jinja2.Environment()
-        env.filters["passes"] = lambda x: [res for res in x if res == True]
-        env.filters["fails"] = lambda x: [res for res in x if res != True]
+        env.filters["passes"] = lambda x: [res for res in x if res]
+        env.filters["fails"] = lambda x: [res for res in x if not res]
         template = env.from_string(fp.read())
     html = template.render(status=status, date=datetime.datetime.utcnow(), test_results=test_results)
     with open(output_file, "w") as fp:
@@ -992,7 +996,7 @@ def run(tests):
         test_results.append((test_name, test_case_results))
 
         if len(test_cases) == 0:
-            logger.warn(f"no test cases are available to conduct the test {test_name}")
+            logger.warning(f"no test cases are available to conduct the test {test_name}")
             continue
 
         for test_case in test_cases:
@@ -1002,9 +1006,9 @@ def run(tests):
                 test_fixture = candidate[-1]
                 assert isinstance(test_fixture, TestFixture) or test_fixture is None
                 if isinstance(test_fixture, CompositeTestFixture):
-                    candidates += [tuple(candidate[:-1]) + (tf,) for tf in test_fixture._subfixtures]
+                    candidates += [(*tuple(candidate[:-1]), tf) for tf in test_fixture._subfixtures]
                 else:
-                    candidates.append(tuple(candidate[:-1]) + (([] if test_fixture is None else [test_fixture]),))
+                    candidates.append((*tuple(candidate[:-1]), [] if test_fixture is None else [test_fixture]))
 
             # Select the first candidate that is feasible
             params, test_fixture = (None, None)
@@ -1014,7 +1018,7 @@ def run(tests):
                     break
 
             if params is None:
-                logger.warn(
+                logger.warning(
                     f"I found a {type(test).__name__} test case with {len(candidates)} possible parameter combination candidates but none of them is feasible."
                 )
                 continue
@@ -1067,8 +1071,8 @@ def run(tests):
     if args.html:
         render_html_summary("finished", test_results, args.html)
 
-    passes = [res for t in test_results for res in t[1] if res == True]
-    fails = [res for t in test_results for res in t[1] if res != True]
+    passes = [res for t in test_results for res in t[1] if res]
+    fails = [res for t in test_results for res in t[1] if not res]
     if len(fails):
         logger.error(f"{len(fails)} out of {len(fails) + len(passes)} test cases failed.")
     else:

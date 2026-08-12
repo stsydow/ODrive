@@ -11,17 +11,14 @@ from odrive.enums import *
 try:
     if platform.system() == "Windows":
         import colorama
-        import win32console
+        import win32console  # noqa: F401  (canary: fail loudly if not installed)
 
         colorama.init()
 except ImportError:
     print("Could not init terminal features.")
     print("Refer to install instructions at http://docs.odriverobotics.com/#downloading-and-installing-tools")
     sys.stdout.flush()
-    pass
 
-if sys.version_info < (3, 0):
-    input = raw_input
 
 _VT100Colors = {
     "green": "\x1b[92;1m",
@@ -101,7 +98,6 @@ def dump_errors(odrv, clear=False, printfunc=print):
             if not hasattr(obj, elem):
                 printfunc(prefix + _VT100Colors["yellow"] + "not found" + _VT100Colors["default"])
                 return
-            parent = obj
             obj = getattr(obj, elem)
         if obj != 0:
             printfunc(indent + name + ": " + _VT100Colors["red"] + "Error(s):" + _VT100Colors["default"])
@@ -225,7 +221,9 @@ def start_liveplotter(get_var_callback):
     plot_t.start()
 
     return cancellation_token
-    # plot_data()
+
+
+# plot_data()
 
 
 class BulkCapture:
@@ -265,7 +263,7 @@ class BulkCapture:
                     time.sleep(1)
                     continue
                 relative_time = time.monotonic() - start_time
-                vals.append([relative_time] + data)
+                vals.append([relative_time, *data])
                 time.sleep(period - (relative_time % period))  # this ensures consistently timed samples
             self.data = np.array(vals)  # A lock is not really necessary due to the event
             print("Capture complete")
@@ -296,13 +294,19 @@ class BulkCapture:
 def step_and_plot(axis, step_size=100.0, settle_time=0.5, data_rate=500.0, ctrl_mode=CONTROL_MODE_POSITION_CONTROL):
 
     if ctrl_mode is CONTROL_MODE_POSITION_CONTROL:
-        get_var_callback = lambda: [axis.encoder.pos_estimate, axis.controller.pos_setpoint]
+
+        def get_var_callback():
+            return [axis.encoder.pos_estimate, axis.controller.pos_setpoint]
+
         initial_setpoint = axis.encoder.pos_estimate
 
         def set_setpoint(setpoint):
             axis.controller.pos_setpoint = setpoint
     elif ctrl_mode is CONTROL_MODE_VELOCITY_CONTROL:
-        get_var_callback = lambda: [axis.encoder.vel_estimate, axis.controller.vel_setpoint]
+
+        def get_var_callback():
+            return [axis.encoder.vel_estimate, axis.controller.vel_setpoint]
+
         initial_setpoint = 0
 
         def set_setpoint(setpoint):
@@ -408,9 +412,9 @@ def usb_burn_in_test(get_var_callback, cancellation_token):
 def yes_no_prompt(question, default=None):
     if default is None:
         question += " [y/n] "
-    elif default == True:
+    elif default:
         question += " [Y/n] "
-    elif default == False:
+    elif not default:
         question += " [y/N] "
 
     while True:
@@ -548,7 +552,7 @@ def dump_interrupts(odrv):
 def dump_threads(odrv):
     prefixes = ["max_stack_usage_", "stack_size_", "prio_"]
     keys = [k[len(prefix) :] for k in dir(odrv.system_stats) for prefix in prefixes if k.startswith(prefix)]
-    good_keys = set([k for k in set(keys) if keys.count(k) == len(prefixes)])
+    good_keys = {k for k in set(keys) if keys.count(k) == len(prefixes)}
     if len(good_keys) > len(set(keys)):
         print(f"Warning: incomplete thread information for threads {set(keys) - good_keys}")
 
@@ -771,11 +775,11 @@ def dump_timing(odrv, n_samples=100, path="/tmp/timings.png"):
 
     # Take a couple of samples
     print("sampling...")
-    for i in range(n_samples):
+    for _i in range(n_samples):
         odrv.task_timers_armed = True  # Trigger sample and wait for it to finish
         while odrv.task_timers_armed:
             pass
-        for name, obj, start_times, lengths in timings:
+        for _name, obj, start_times, lengths in timings:
             start_times.append(obj.start_time)
             lengths.append(obj.length)
     print("done")
