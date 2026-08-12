@@ -18,7 +18,14 @@ select = ["E", "F", "I", "UP", "B", "RUF", "BLE", "C"]
 # libfibre.py). The imports are deliberate, so fold F403 (star-import) and
 # F405 (usage of a star-imported name) for them only; F821 still catches names
 # that are genuinely undefined everywhere else.
+#
+# A few files also import after setup code that must run first (sys.path
+# prepend, __version__ computation, conditional sdist guard), so fold E402 for
+# those; the imports are order-dependent by design.
 [lint.per-file-ignores]
+"tools/odrive/__init__.py" = ["E402"]
+"tools/setup.py" = ["E402"]
+"docs/exts/fibre_autodoc.py" = ["E402"]
 "tools/odrive/tests/*.py" = ["F403", "F405"]
 "tools/odrive/pyfibre/fibre/*.py" = ["F403", "F405"]
 "tools/create_can_dbc.py" = ["F403", "F405"]

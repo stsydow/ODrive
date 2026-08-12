@@ -61,7 +61,7 @@ async def discovered_device(device):
     globals()["odrives"][odrive_name] = device
     globals()["odrives_status"][odrive_name] = True
     print("Found " + str(serial_number))
-    print("odrive list: " + str([key for key in globals()["odrives"].keys()]))
+    print("odrive list: " + str(list(globals()["odrives"].keys())))
     # tell GUI the status of known ODrives (previously connected and then disconnected ODrives will be "False")
     socketio.emit("odrives-status", json.dumps(globals()["odrives_status"]))
     # triggers a getODrives socketio message
@@ -70,13 +70,11 @@ async def discovered_device(device):
 
 def start_discovery():
     print("starting disco loop...")
-    log = fibre.Logger(verbose=False)
-
     domain = fibre.Domain(
         "usb:idVendor=0x1209,idProduct=0x0D32,bInterfaceClass=0,bInterfaceSubClass=1,bInterfaceProtocol=0"
     )
     domain = domain.__enter__()
-    discovery = domain.run_discovery(discovered_device)
+    domain.run_discovery(discovered_device)
 
 
 def handle_disconnect(odrive_name):
@@ -137,7 +135,7 @@ def get_odrives(data):
     # for (index, odrv) in enumerate(globals()['odrives']):
     #    odriveDict["odrive" + str(index)] = dictFromRO(odrv)
     for key in globals()["odrives_status"].keys():
-        if globals()["odrives_status"][key] == True:
+        if globals()["odrives_status"][key]:
             odriveDict[key] = dictFromRO(globals()["odrives"][key])
     globals()["inUse"] = False
     emit("odrives", json.dumps(odriveDict))
@@ -207,7 +205,7 @@ def dictFromRO(RO):
                 val = "-Infinity"
                 _type = "str"
             returnDict[key[1:-9]] = {"val": val, "readonly": not hasattr(v, "exchange"), "type": _type}
-        elif not key.startswith("_") and hasattr(v, "__call__"):
+        elif not key.startswith("_") and callable(v):
             # this is a function - do nothing for now.
             print("found a function!", key)
             returnDict[key] = "function"
@@ -240,7 +238,7 @@ def postVal(odrives, keyList, value, argType):
         handle_disconnect(odrv)
     except (AttributeError, ValueError) as ex:
         print("attribute error in postVal (non-fatal):", ex)
-    except Exception:
+    except (KeyError, TypeError) as ex:
         print("exception in postVal: ", traceback.format_exc())
 
 
@@ -263,7 +261,7 @@ def getVal(odrives, keyList):
         # axis doesn't exist, property not available, etc.
         print("attribute error in getVal (non-fatal):", ex)
         return 0
-    except Exception:
+    except (KeyError, TypeError) as ex:
         print("exception in getVal: ", traceback.format_exc())
         return 0
 
@@ -286,11 +284,11 @@ def callFunc(odrives, keyList):
         RO = odrives[odrv]
         for key in keyList:
             RO = getattr(RO, key)
-        if hasattr(RO, "__call__"):
+        if callable(RO):
             RO.__call__()
     except fibre.ObjectLostError:
         handle_disconnect(odrv)
-    except:
+    except KeyError:
         print("fcn call failed")
 
 

@@ -52,7 +52,7 @@ def set_dict(obj, path, config_dict):
                 remote_attribute = getattr(obj, "_" + k + "_property")
                 # if isinstance(v, str) and isinstance()
                 remote_attribute.exchange(v)
-            except Exception as ex:
+            except (AttributeError, ValueError, TypeError) as ex:
                 errors.append(f"Could not restore {name}: {ex!s}")
     return errors
 

@@ -10,6 +10,7 @@ import time
 from ctypes import *
 from itertools import count
 from types import MethodType
+from typing import ClassVar
 
 # Enable this for better tracebacks in some cases
 # import tracemalloc
@@ -82,7 +83,7 @@ if os.name == "nt":
     try:
         # New way in python 3.8+
         os.add_dll_directory(dll_dir)
-    except:
+    except OSError:
         os.environ["PATH"] = dll_dir + os.pathsep + os.environ["PATH"]
     lib = windll.LoadLibrary(lib_path)
 else:
@@ -140,7 +141,7 @@ kFibreHostUnreachable = 7
 
 
 class LibFibreVersion(Structure):
-    _fields_ = [
+    _fields_: ClassVar = [
         ("major", c_uint16),
         ("minor", c_uint16),
         ("patch", c_uint16),
@@ -151,7 +152,7 @@ class LibFibreVersion(Structure):
 
 
 class LibFibreEventLoop(Structure):
-    _fields_ = [
+    _fields_: ClassVar = [
         ("post", PostSignature),
         ("register_event", RegisterEventSignature),
         ("deregister_event", DeregisterEventSignature),
@@ -315,7 +316,7 @@ class ObjectPtrCodec:
             return struct.pack("P", value._obj_handle)
         else:
             raise TypeError(
-                f"Expected value of type RemoteObject or None but got '{type(value).__name__}'. An example for a RemoteObject is this expression: odrv0.axis0.controller._input_pos_property"
+                f"Expected value of type RemoteObject or None but got '{type(value).__name__}'. An example for a RemoteObject is this expression: odrv0.axis0.controller._input_pos_property"  # noqa: E501
             )
 
     def deserialize(self, libfibre, buffer):
@@ -815,7 +816,7 @@ class RemoteObject:
                         lines.append(indent + key + ": " + val_str + " (" + property_type + ")")
                 else:
                     lines.append(indent + key + ": " + str(type(val)))
-        except:
+        except Exception:
             return "[failed to dump object]"
 
         return "\n".join(lines)

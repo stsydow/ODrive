@@ -1,3 +1,5 @@
+from itertools import chain
+
 from cantools.database import *
 from odrive.enums import *
 
@@ -235,8 +237,6 @@ for axisID in range(8):
 
     msgList.append(axisMsgs)
 
-
-from itertools import chain
 
 msgList = list(chain.from_iterable(msgList))
 

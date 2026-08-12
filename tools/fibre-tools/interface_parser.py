@@ -104,17 +104,17 @@ class Loader:
         return None  # TODO
 
     def load_args_from_data(self, ns_path, arg_data, using):
-        for k, arg_data in arg_data.items():
-            if isinstance(arg_data, str) or ("type" not in arg_data):
-                arg_data = {"type": arg_data}
+        for k, entry in arg_data.items():
+            if isinstance(entry, str) or ("type" not in entry):
+                entry = {"type": entry}
 
-            if isinstance(arg_data["type"], str):
-                type_ref = TypeNameRef(self._registry, [ns_path, *using], arg_data["type"])
+            if isinstance(entry["type"], str):
+                type_ref = TypeNameRef(self._registry, [ns_path, *using], entry["type"])
             else:
-                type = self.load_type_from_data(ns_path, to_pascal_case(k), arg_data["type"], using)
+                type = self.load_type_from_data(ns_path, to_pascal_case(k), entry["type"], using)
                 type_ref = ResolvedTypeRef(type)
 
-            yield ArgInfo(k, type_ref, arg_data.get("doc", None))
+            yield ArgInfo(k, type_ref, entry.get("doc", None))
 
     def load_type_from_data(self, ns_path, type_name, type_data, using: list[list["NamespaceInfo"]]):
         ns = self._registry.global_namespace.ns_from_path(ns_path, construct_if_missing=True)

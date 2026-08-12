@@ -152,7 +152,7 @@ class TestUartAscii(UartTest):
             old_gain = odrive.handle.axis0.motor.current_control.p_gain
             test_assert_eq(old_gain, 1000, accuracy=0.0001)  # must be non-zero for subsequent check to work
             ser.write(
-                f"w axis0.motor.config.current_control_bandwidth {odrive.handle.axis0.motor.config.current_control_bandwidth / 2}\n".encode(
+                f"w axis0.motor.config.current_control_bandwidth {odrive.handle.axis0.motor.config.current_control_bandwidth / 2}\n".encode(  # noqa: E501
                     "ascii"
                 )
             )

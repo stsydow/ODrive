@@ -1,6 +1,7 @@
 import platform
 import sys
 import threading
+from typing import ClassVar
 
 try:
     if platform.system() == "Windows":
@@ -133,7 +134,7 @@ class Logger:
     COLOR_YELLOW = 3
     COLOR_RED = 4
 
-    _VT100Colors = {
+    _VT100Colors: ClassVar = {
         COLOR_GREEN: "\x1b[92;1m",
         COLOR_CYAN: "\x1b[96;1m",
         COLOR_YELLOW: "\x1b[93;1m",
@@ -141,7 +142,13 @@ class Logger:
         COLOR_DEFAULT: "\x1b[0m",
     }
 
-    _Win32Colors = {COLOR_GREEN: 0x0A, COLOR_CYAN: 0x0B, COLOR_YELLOW: 0x0E, COLOR_RED: 0x0C, COLOR_DEFAULT: 0x07}
+    _Win32Colors: ClassVar = {
+        COLOR_GREEN: 0x0A,
+        COLOR_CYAN: 0x0B,
+        COLOR_YELLOW: 0x0E,
+        COLOR_RED: 0x0C,
+        COLOR_DEFAULT: 0x07,
+    }
 
     def __init__(self, verbose=True):
         self._prefix = ""

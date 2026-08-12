@@ -245,7 +245,7 @@ class SafeTerminator:
             try:
                 axis_ctx.handle.requested_state = AXIS_STATE_IDLE
                 idle_axes.append(axis_ctx)
-            except:
+            except fibre.ObjectLostError:
                 self.logger.error(f"can't put axis {axis_ctx} into idle")
         # TODO: review if erase_configuration is safe during active PWM
         time.sleep(0.005)
@@ -497,7 +497,7 @@ class TeensyComponent(Component):
         code = ""
         code += "bool noise = false;\n"
         code += "void setup() {\n"
-        for i, o, n in self.routes:
+        for _i, o, _n in self.routes:
             code += f"  pinMode({o.num}, OUTPUT);\n"
         code += "}\n"
         code += "void loop() {\n"
@@ -1019,12 +1019,12 @@ def run(tests):
 
             if params is None:
                 logger.warning(
-                    f"I found a {type(test).__name__} test case with {len(candidates)} possible parameter combination candidates but none of them is feasible."
+                    f"I found a {type(test).__name__} test case with {len(candidates)} possible parameter combination candidates but none of them is feasible."  # noqa: E501
                 )
                 continue
 
             logger.notify(
-                f"* preparing {type(test).__name__} with {[(testrig.get_component_name(p) if isinstance(p, Component) else str(p)) for p in params]}..."
+                f"* preparing {type(test).__name__} with {[(testrig.get_component_name(p) if isinstance(p, Component) else str(p)) for p in params]}..."  # noqa: E501
             )
 
             # Prepare all components
@@ -1055,13 +1055,13 @@ def run(tests):
                 tf.prepare(logger)
 
             logger.notify(
-                f"* running {type(test).__name__} on {[(testrig.get_component_name(p) if isinstance(p, Component) else str(p)) for p in params]}..."
+                f"* running {type(test).__name__} on {[(testrig.get_component_name(p) if isinstance(p, Component) else str(p)) for p in params]}..."  # noqa: E501
             )
 
             try:
                 test.run_test(*params, logger)
                 test_case_results.append(True)
-            except Exception as ex:
+            except Exception as ex:  # noqa: BLE001  (record test failure, keep running)
                 traceback.print_exc()
                 test_case_results.append(ex)
 

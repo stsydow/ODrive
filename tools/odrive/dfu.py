@@ -19,18 +19,9 @@ import odrive
 from odrive.dfuse import *
 from odrive.utils import Event, OperationAbortedException
 
-if sys.version_info < (3, 0):
-    _print = print
-
-    def print(*vals, **kwargs):
-        _print(*vals)
-        if kwargs.get("flush", False):
-            sys.stdout.flush()
-
-
 try:
     from intelhex import IntelHex
-except:
+except ImportError:
     sudo_prefix = "" if platform.system() == "Windows" else "sudo "
     print(f"You need intelhex for this ({sudo_prefix}pip install IntelHex)", file=sys.stderr)
     sys.exit(1)
@@ -93,12 +84,16 @@ def dump_otp(dfudev):
     The OTP is used to determine the board version.
     """
     # 512 Byte OTP
-    otp_sector = [s for s in dfudev.sectors if s["name"] == "OTP Memory" and s["addr"] == 0x1FFF7800][0]
+    otp_sector = next(
+        s for s in dfudev.sectors if s["name"] == "OTP Memory" and s["addr"] == 0x1FFF7800
+    )
     data = dfudev.read_sector(otp_sector)
     print(" ".join(f"{x:02X}" for x in data))
 
     # 16 lock bytes
-    otp_lock_sector = [s for s in dfudev.sectors if s["name"] == "OTP Memory" and s["addr"] == 0x1FFF7A00][0]
+    otp_lock_sector = next(
+        s for s in dfudev.sectors if s["name"] == "OTP Memory" and s["addr"] == 0x1FFF7A00
+    )
     data = dfudev.read_sector(otp_lock_sector)
     print(" ".join(f"{x:02X}" for x in data))
 
@@ -202,7 +197,7 @@ def get_all_github_firmwares():
                 if asset_json["name"].lower().endswith(".hex"):
                     fw = FirmwareFromGithub(release_json, asset_json)
                     yield fw
-            except Exception as ex:
+            except (KeyError, ValueError) as ex:
                 print(ex)
 
 
@@ -285,7 +280,9 @@ def get_hw_version_in_dfu_mode(dfudev):
     Reads the hardware version from one-time-programmable memory.
     This is written on all ODrives sold since Summer 2018.
     """
-    otp_sector = [s for s in dfudev.sectors if s["name"] == "OTP Memory" and s["addr"] == 0x1FFF7800][0]
+    otp_sector = next(
+        s for s in dfudev.sectors if s["name"] == "OTP Memory" and s["addr"] == 0x1FFF7800
+    )
     otp_data = dfudev.read_sector(otp_sector)
     if otp_data[0] == 0:
         otp_data = otp_data[16:]
@@ -369,7 +366,7 @@ def update_device(device, firmware, logger, cancellation_token):
     if firmware is None:
         if hw_version == (0, 0, 0):
             if dfudev is None:
-                suggestion = "You have to manually flash an up-to-date firmware to make automatic checks work. Run `odrivetool dfu --help` for more info."
+                suggestion = "You have to manually flash an up-to-date firmware to make automatic checks work. Run `odrivetool dfu --help` for more info."  # noqa: E501
             else:
                 suggestion = "Please contact info@odriverobotics.com with your order number for help."
             raise Exception("Cannot check online for new firmware because the board version is unknown. " + suggestion)
@@ -383,11 +380,11 @@ def update_device(device, firmware, logger, cancellation_token):
         print()
         if firmware.fw_version < fw_version:
             print(
-                f"Warning: you are about to flash firmware {get_fw_version_string(firmware.fw_version)} which is older than the firmware on the device ({get_fw_version_string(fw_version)})."
+                f"Warning: you are about to flash firmware {get_fw_version_string(firmware.fw_version)} which is older than the firmware on the device ({get_fw_version_string(fw_version)})."  # noqa: E501
             )
         else:
             print(
-                f"You are about to flash firmware {get_fw_version_string(firmware.fw_version)} which is the same version as the firmware on the device ({get_fw_version_string(fw_version)})."
+                f"You are about to flash firmware {get_fw_version_string(firmware.fw_version)} which is the same version as the firmware on the device ({get_fw_version_string(fw_version)})."  # noqa: E501
             )
         if not odrive.utils.yes_no_prompt("Do you want to flash this firmware anyway?", False):
             raise OperationAbortedException()
@@ -409,7 +406,7 @@ def update_device(device, firmware, logger, cancellation_token):
         if do_backup_config:
             odrive.configuration.backup_config(device, None, logger)
     elif not odrive.utils.yes_no_prompt(
-        "The configuration cannot be backed up because the device is already in DFU mode. The configuration may be lost after updating. Do you want to continue anyway?",
+        "The configuration cannot be backed up because the device is already in DFU mode. The configuration may be lost after updating. Do you want to continue anyway?",  # noqa: E501
         True,
     ):
         raise OperationAbortedException()
@@ -545,7 +542,7 @@ def launch_dfu(args, logger, cancellation_token):
 
 
 # Note: the flashed image can be verified using: (0x12000 is the number of bytes to read)
-# $ openocd -f interface/stlink-v2.cfg -f target/stm32f4x.cfg -c init -c flash\ read_bank\ 0\ image.bin\ 0\ 0x12000 -c exit
+# $ openocd -f interface/stlink-v2.cfg -f target/stm32f4x.cfg -c init -c flash\ read_bank\ 0\ image.bin\ 0\ 0x12000 -c exit  # noqa: E501
 # $ hexdump -C image.bin > image.bin.txt
 #
 # If you compare this with a reference image that was flashed with the STLink, you will see

@@ -40,7 +40,7 @@ class TestInputs:
 
                 if any(disconnected_gpios):
                     logger.debug(
-                        f"note: can't run GPIO test on {testrig.get_component_name(odrive)} because GPIOs {disconnected_gpios} are not connected to a Teensy."
+                        f"note: can't run GPIO test on {testrig.get_component_name(odrive)} because GPIOs {disconnected_gpios} are not connected to a Teensy."  # noqa: E501
                     )
                 else:
                     alternatives.append(

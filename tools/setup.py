@@ -26,13 +26,19 @@ you intend to release and then run the above command without the "test" (so just
 
 To install a prerelease version from test index:
 (extra-index-url is there because some packages don't upload to test server)
-    sudo pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ --no-cache-dir odrive
+    sudo pip install --pre --index-url https://test.pypi.org/simple/ --extra-index-url \
+https://pypi.org/simple/ --no-cache-dir odrive
 
 
 PyPi access requires that you have set up ~/.pypirc with your
 PyPi credentials and that your account has the rights
 to publish packages with the name odrive.
 """
+
+import os
+import sys
+
+from setuptools import setup
 
 # Set to true to make the current release
 is_release = True
@@ -46,11 +52,6 @@ devnum = 0
 bump_rev = not is_post_release and not is_release
 
 # TODO: add additional y/n prompt to prevent from erroneous upload
-
-import os
-import sys
-
-from setuptools import setup
 
 creating_package = "sdist" in sys.argv
 
@@ -80,7 +81,7 @@ if not creating_package:
     if platform.system() == "Linux":
         try:
             odrive.version.setup_udev_rules(None)
-        except Exception:
+        except OSError:
             print("Warning: could not set up udev rules. Run `sudo odrivetool udev-setup` to try again.")
 
 try:

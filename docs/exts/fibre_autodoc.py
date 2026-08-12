@@ -1,9 +1,10 @@
 import os
 import re
+import sys
 from collections.abc import Callable  # needed to recreate OptionSpec
 
 # from sphinx.util.typing import OptionSpec     # not present in windows/pip3 sphinx install
-from typing import Any
+from typing import Any, ClassVar
 
 from docutils import nodes
 from docutils.nodes import Node
@@ -15,11 +16,9 @@ from sphinx.util.docutils import SphinxDirective, switch_source_input
 
 OptionSpec = dict[str, Callable[[str], Any]]  # sphinx.util.typing.OptionSpec from GitHub
 
-import sys
-
 sys.path.append(os.path.abspath("../tools/fibre-tools"))
-import interface_parser  # noqa: E402
-import type_registry  # noqa: E402
+import interface_parser
+import type_registry
 
 
 def load_file(name, state):
@@ -201,7 +200,7 @@ class FibredocDirective(SphinxDirective):
 
     required_arguments = 1
     optional_arguments = 0
-    option_spec: OptionSpec = {
+    option_spec: ClassVar[OptionSpec] = {
         "bitfields": directives.flag,
         "enums": directives.flag,
         "classes": directives.flag,
@@ -251,7 +250,7 @@ def autosummary_noop(self: nodes.NodeVisitor, node: Node) -> None:
 class FibresummaryDirective(SphinxDirective):
     required_arguments = 1
     optional_arguments = 0
-    option_spec: OptionSpec = {
+    option_spec: ClassVar[OptionSpec] = {
         "caption": directives.unchanged_required,
     }
 

@@ -349,7 +349,7 @@ class InterfaceRefElement:
                 return generics[probe_name](typeargs)
 
         raise Exception(
-            f"could not resolve type {self._name} in {self._scope}. Known interfaces are: {list(interfaces.keys())}. Known value types are: {list(value_types.keys())}"
+            f"could not resolve type {self._name} in {self._scope}. Known interfaces are: {list(interfaces.keys())}. Known value types are: {list(value_types.keys())}"  # noqa: E501
         )
 
 
@@ -570,7 +570,7 @@ def generate_endpoint_table(intf, bindto, idx):
 
     for k, prop in intf.get_all_attributes().items():
         property_value_type = re.findall("^fibre\.Property<([^>]*), (readonly|readwrite)>$", prop["type"].fullname)
-        # attr_bindto = join_name(bindto, bindings_map.get(join_name(intf['fullname'], k), k + ('_' if len(intf['functions']) or (intf['fullname'] in treat_as_classes) else '')))
+        # attr_bindto = join_name(bindto, bindings_map.get(join_name(intf['fullname'], k), k + ('_' if len(intf['functions']) or (intf['fullname'] in treat_as_classes) else '')))  # noqa: E501
         attr_bindto = intf.c_name + "::get_" + prop["name"] + "(" + bindto + ")"
         if len(property_value_type):
             # Special handling for Property<...> attributes: they resolve to one single endpoint
@@ -659,7 +659,7 @@ group.add_argument("-o", "--output", type=argparse.FileType("w", encoding="utf-8
 group.add_argument(
     "--outputs",
     type=str,
-    help="path pattern for the generated outputs. One output is generated for each interface. Use # as placeholder for the interface name.",
+    help="path pattern for the generated outputs. One output is generated for each interface. Use # as placeholder for the interface name.",  # noqa: E501
 )
 parser.add_argument(
     "--generate-endpoints",
@@ -715,7 +715,7 @@ if args.verbose:
 clashing_names = list(set(value_types.keys()).intersection(set(interfaces.keys())))
 if len(clashing_names):
     print(
-        f"**Error**: Found both an interface and a value type with the name {clashing_names[0]}. This is not allowed, interfaces and value types (such as enums) share the same namespace.",
+        f"**Error**: Found both an interface and a value type with the name {clashing_names[0]}. This is not allowed, interfaces and value types (such as enums) share the same namespace.",  # noqa: E501
         file=sys.stderr,
     )
     sys.exit(1)

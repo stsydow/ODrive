@@ -98,7 +98,7 @@ def launch_shell(args, mount, interactive_variables, print_banner, print_help, l
                 import IPython
 
                 use_ipython = True
-            except:
+            except ImportError:
                 print("Warning: you don't have IPython installed.")
                 print("If you want to have an improved interactive console with pretty colors,")
                 print("you should install IPython\n")
@@ -134,7 +134,7 @@ def launch_shell(args, mount, interactive_variables, print_banner, print_help, l
                 import readline  # Works only on Unix
 
                 readline.parse_and_bind("tab: complete")
-            except:
+            except ImportError:
                 sudo_prefix = "" if platform.system() == "Windows" else "sudo "
                 print(
                     "Warning: could not enable tab-complete. User experience will suffer.\n"

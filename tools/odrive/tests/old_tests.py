@@ -1,3 +1,4 @@
+import abc
 import functools
 import math
 import shlex
@@ -13,8 +14,6 @@ import odrive.utils
 from odrive.enums import *
 
 print = functools.partial(print, flush=True)
-
-import abc
 
 ABC = abc.ABC
 
@@ -184,8 +183,8 @@ class AxisTest(ABC):
             axis_ctx.odrv_ctx.yaml["vbus-voltage"] * 1.08,
             accuracy=0.001,
         )
-        # test_assert_eq(axis_ctx.odrv_ctx.handle.config.dc_bus_undervoltage_trip_level, axis_ctx.odrv_ctx.yaml['vbus-voltage'] * 0.96, accuracy=0.001)
-        # test_assert_eq(axis_ctx.odrv_ctx.handle.config.dc_bus_overvoltage_trip_level, axis_ctx.odrv_ctx.yaml['vbus-voltage'] * 1.04, accuracy=0.001)
+        # test_assert_eq(axis_ctx.odrv_ctx.handle.config.dc_bus_undervoltage_trip_level, axis_ctx.odrv_ctx.yaml['vbus-voltage'] * 0.96, accuracy=0.001)  # noqa: E501
+        # test_assert_eq(axis_ctx.odrv_ctx.handle.config.dc_bus_overvoltage_trip_level, axis_ctx.odrv_ctx.yaml['vbus-voltage'] * 1.04, accuracy=0.001)  # noqa: E501
 
     @abc.abstractmethod
     def run_test(self, axis_ctx: AxisTestContext, logger):
@@ -500,7 +499,7 @@ class TestHighVelocity(AxisTest):
             time.sleep(0.5)
             # If the velocity integrator at work, it may now work against slowing down.
             test_assert_eq(axis_ctx.handle.encoder.vel_estimate, 0, range=rated_limit * 0.3)
-            # TODO: this is not a good bound, but the encoder float resolution results in a bad velocity estimate after this many turns
+            # TODO: this is not a good bound, but the encoder float resolution results in a bad velocity estimate after this many turns  # noqa: E501
             time.sleep(0.5)
             test_assert_eq(axis_ctx.handle.encoder.vel_estimate, 0, range=2000)
             request_state(axis_ctx, AXIS_STATE_IDLE)

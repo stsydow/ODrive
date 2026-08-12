@@ -141,24 +141,28 @@ try:
     for test in all_tests:
         if isinstance(test, ODriveTest):
 
-            def odrv_test_thread(odrv_name):
+            def odrv_test_thread(odrv_name, test=test):
                 odrv_ctx = odrives_by_name[odrv_name]
                 logger.notify(f"* running {type(test).__name__} on {odrv_name}...")
                 try:
                     test.check_preconditions(odrv_ctx, logger.indent(f"  {odrv_name}: "))
-                except:
-                    raise PreconditionsNotMet()
+                except Exception as e:
+                    raise PreconditionsNotMet() from e
                 test.run_test(odrv_ctx, logger.indent(f"  {odrv_name}: "))
 
             if test._exclusive:
                 for odrv in odrives_by_name:
                     odrv_test_thread(odrv)
             else:
-                for_all_parallel(odrives_by_name, lambda x: type(test).__name__ + " on " + x, odrv_test_thread)
+                for_all_parallel(
+                    odrives_by_name,
+                    lambda x, test=test: type(test).__name__ + " on " + x,
+                    odrv_test_thread,
+                )
 
         elif isinstance(test, AxisTest):
 
-            def axis_test_thread(axis_name):
+            def axis_test_thread(axis_name, test=test):
                 # Get all axes that are mechanically coupled with the axis specified by axis_name
                 conflicting_axes = functools.reduce(
                     operator.iadd, [c for c in couplings if (axis_name in [a.name for a in c])], []
@@ -176,12 +180,12 @@ try:
                         logger.notify(f"* running {type(test).__name__} on {axis_name}...")
                         try:
                             test.check_preconditions(axis_ctx, logger.indent(f"  {axis_name}: "))
-                        except:
-                            raise PreconditionsNotMet()
+                        except Exception as e:
+                            raise PreconditionsNotMet() from e
                         test.run_test(axis_ctx, logger.indent(f"  {axis_name}: "))
                     else:
                         logger.warning(f"- skipping {type(test).__name__} on {axis_name}")
-                except:
+                except Exception:
                     app_shutdown_token.set()
                     raise
                 finally:
@@ -189,11 +193,11 @@ try:
                     for conflicting_axis in conflicting_axes:
                         conflicting_axis.lock.release()
 
-            for_all_parallel(axes_by_name, lambda x: type(test).__name__ + " on " + x, axis_test_thread)
+            for_all_parallel(axes_by_name, lambda x, test=test: type(test).__name__ + " on " + x, axis_test_thread)
 
         elif isinstance(test, DualAxisTest):
 
-            def dual_axis_test_thread(coupling):
+            def dual_axis_test_thread(coupling, test=test):
                 coupling_name = "...".join([a.name for a in coupling])
                 # Remove duplicates
                 coupled_axes = list(set(coupling))
@@ -209,12 +213,12 @@ try:
                             test.check_preconditions(
                                 coupled_axes[0], coupled_axes[1], logger.indent(f"  {coupling_name}: ")
                             )
-                        except:
-                            raise PreconditionsNotMet()
+                        except Exception as e:
+                            raise PreconditionsNotMet() from e
                         test.run_test(coupled_axes[0], coupled_axes[1], logger.indent(f"  {coupling_name}: "))
                     else:
                         logger.warning(f"- skipping {type(test).__name__} on {coupling_name}...")
-                except:
+                except Exception:
                     app_shutdown_token.set()
                     raise
                 finally:
@@ -224,14 +228,14 @@ try:
 
             for_all_parallel(
                 couplings,
-                lambda x: type(test).__name__ + " on " + "..".join([a.name for a in x]),
+                lambda x, test=test: type(test).__name__ + " on " + "..".join([a.name for a in x]),
                 dual_axis_test_thread,
             )
 
         else:
             logger.warning(f"ignoring unknown test type {type(test)}")
 
-except:
+except Exception:
     logger.error(traceback.format_exc())
     logger.debug("=> Test failed. Please wait while I secure the test rig...")
     try:
@@ -247,7 +251,7 @@ except:
                 dump_errors(odrv_ctx.axes[1], logger)
 
             for_all_parallel(odrives_by_name, lambda x: x["name"], odrv_reset_thread)
-    except:
+    except Exception:
         logger.error("///////////////////////////////////////////")
         logger.error("/// CRITICAL: COULD NOT SECURE TEST RIG ///")
         logger.error("///     CUT THE POWER IMMEDIATELY!      ///")

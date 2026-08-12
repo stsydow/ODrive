@@ -16,7 +16,7 @@ class TestStepDir:
     def get_test_cases(self, testrig: TestRig):
         for odrive in testrig.get_components(ODriveComponent):
 
-            def stepdir_test_case(axis, step_gpio_num, dir_gpio_num):
+            def stepdir_test_case(axis, step_gpio_num, dir_gpio_num, odrive=odrive):
                 alternatives = []
                 for step_ctrl_gpio, tf1 in testrig.get_connected_components(
                     (getattr(odrive, f"gpio{step_gpio_num}"), False), LinuxGpioComponent

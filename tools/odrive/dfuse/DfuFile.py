@@ -22,7 +22,7 @@ class DfuFile:
 
         try:
             dfufile = open(path, "rb")
-        except Exception:
+        except OSError:
             raise argparse.ArgumentTypeError(f"Could not open file {path!r}") from None
 
         with dfufile:

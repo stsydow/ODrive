@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
 
-class TypeInfo(ABC):
+class TypeInfo:
     pass
 
 

@@ -1,5 +1,7 @@
 import os
 import sys
+import threading
+import time
 
 # We want to use the fibre package that is included with the odrive package
 # in order to avoid any version mismatch issues,
@@ -12,9 +14,6 @@ from .version import get_version_str
 
 __version__ = get_version_str()
 del get_version_str
-
-import threading
-import time
 
 from .utils import get_serial_number_str, get_serial_number_str_sync  # noqa: F401
 
