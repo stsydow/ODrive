@@ -3,12 +3,11 @@
 Example usage of the ODrive python library to monitor and control ODrive devices
 """
 
-from __future__ import print_function
+import math
+import time
 
 import odrive
 from odrive.enums import *
-import time
-import math
 
 # Find a connected ODrive (this will block until you connect one)
 print("finding an odrive...")
@@ -30,13 +29,13 @@ my_drive.axis0.controller.input_pos = 3.14
 print("Position setpoint is " + str(my_drive.axis0.controller.pos_setpoint))
 
 # And this is how function calls are done:
-for i in [1,2,3,4]:
-    print('voltage on GPIO{} is {} Volt'.format(i, my_drive.get_adc_voltage(i)))
+for i in [1, 2, 3, 4]:
+    print(f"voltage on GPIO{i} is {my_drive.get_adc_voltage(i)} Volt")
 
 # A sine wave to test
 t0 = time.monotonic()
 while True:
-    setpoint = 4.0 * math.sin((time.monotonic() - t0)*2)
+    setpoint = 4.0 * math.sin((time.monotonic() - t0) * 2)
     print("goto " + str(int(setpoint)))
     my_drive.axis0.controller.input_pos = setpoint
     time.sleep(0.01)

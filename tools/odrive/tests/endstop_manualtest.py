@@ -4,7 +4,7 @@ from odrive.utils import *
 
 print("finding an odrive...")
 odrv0 = odrive.find_any()
-print('Odrive found')
+print("Odrive found")
 
 odrv0.axis1.controller.config.vel_limit = 50000
 odrv0.axis1.controller.config.control_mode = CONTROL_MODE_POSITION_CONTROL

@@ -1,13 +1,7 @@
+import time
 
 import test_runner
-
-import time
-import math
-import os
-import numpy as np
-
 from odrive.enums import *
-from odrive.utils import set_motor_thermistor_coeffs
 from test_runner import *
 
 teensy_code_template = """
@@ -29,7 +23,8 @@ void loop() {
 }
 """
 
-class TestInputs():
+
+class TestInputs:
     def get_test_cases(self, testrig: TestRig):
         for odrive in testrig.get_components(ODriveComponent):
             alternatives = []
@@ -38,26 +33,37 @@ class TestInputs():
                 odrive_gpios = [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 13, 14, 16, 17, 18, 19, 20, 21, 22]
 
                 connections = [
-                    testrig.net_by_component.get(getattr(odrive, f'gpio{gpio}'), set()).intersection(set(teensy.gpios))
+                    testrig.net_by_component.get(getattr(odrive, f"gpio{gpio}"), set()).intersection(set(teensy.gpios))
                     for gpio in odrive_gpios
                 ]
                 disconnected_gpios = [gpio for i, gpio in enumerate(odrive_gpios) if not connections[i]]
-                
+
                 if any(disconnected_gpios):
-                    logger.debug(f"note: can't run GPIO test on {testrig.get_component_name(odrive)} because GPIOs {disconnected_gpios} are not connected to a Teensy.")
+                    logger.debug(
+                        f"note: can't run GPIO test on {testrig.get_component_name(odrive)} because GPIOs {disconnected_gpios} are not connected to a Teensy."
+                    )
                 else:
-                    alternatives.append((teensy, tuple(odrive_gpios), tuple([teensy_gpios.pop() for teensy_gpios in connections])))
+                    alternatives.append(
+                        (teensy, tuple(odrive_gpios), tuple([teensy_gpios.pop() for teensy_gpios in connections]))
+                    )
 
-            yield AnyTestCase(*[(odrive, teensy, odrive_gpios, teensy_gpios, None) for teensy, odrive_gpios, teensy_gpios in alternatives])
+            yield AnyTestCase(
+                *[
+                    (odrive, teensy, odrive_gpios, teensy_gpios, None)
+                    for teensy, odrive_gpios, teensy_gpios in alternatives
+                ]
+            )
 
-    def run_test(self, odrive: ODriveComponent, teensy: TeensyComponent, odrive_gpios: tuple, teensy_gpios: tuple, logger: Logger):
-        switch_interval = 0.1 # [s]
+    def run_test(
+        self, odrive: ODriveComponent, teensy: TeensyComponent, odrive_gpios: tuple, teensy_gpios: tuple, logger: Logger
+    ):
+        switch_interval = 0.1  # [s]
 
         code = teensy_code_template.replace("{gpios}", ", ".join(str(gpio.num) for gpio in teensy_gpios))
         teensy.compile_and_program(code)
 
         for gpio_num in odrive_gpios:
-            setattr(odrive.handle.config, f'gpio{gpio_num}_mode', GPIO_MODE_DIGITAL)
+            setattr(odrive.handle.config, f"gpio{gpio_num}_mode", GPIO_MODE_DIGITAL)
         odrive.save_config_and_reboot()
 
         mask = sum((1 << num) for num in odrive_gpios)
@@ -94,9 +100,7 @@ class TestInputs():
         test_assert_eq(best_match, expected)
 
 
-tests = [
-  TestInputs()
-]
+tests = [TestInputs()]
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     test_runner.run(tests)

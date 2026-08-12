@@ -9,7 +9,7 @@ print(msg)
 
 try:
     bus.send(msg)
-    print("Message sent on {}".format(bus.channel_info))
+    print(f"Message sent on {bus.channel_info}")
 except can.CanError:
     print("Message NOT sent!  Please verify can0 is working first")
 
@@ -24,22 +24,22 @@ while True:
             break
 
 for msg in bus:
-    if(msg.arbitration_id == (axisID << 5 | 0x01)):
+    if msg.arbitration_id == (axisID << 5 | 0x01):
         errorCode = msg.data[0] | msg.data[1] << 8 | msg.data[2] << 16 | msg.data[3] << 24
         print("\nReceived Axis heartbeat message:")
         if errorCode == 0x0:
             print("No errors")
         else:
-            print("Axis error!  Error code: "+str(hex(errorCode)))
+            print("Axis error!  Error code: " + str(hex(errorCode)))
         break
 
-print("\nPutting axis",axisID,"into AXIS_STATE_CLOSED_LOOP_CONTROL (0x08)...")
+print("\nPutting axis", axisID, "into AXIS_STATE_CLOSED_LOOP_CONTROL (0x08)...")
 msg = can.Message(arbitration_id=axisID << 5 | 0x07, data=[8, 0, 0, 0, 0, 0, 0, 0], dlc=8, is_extended_id=False)
 print(msg)
 
 try:
     bus.send(msg)
-    print("Message sent on {}".format(bus.channel_info))
+    print(f"Message sent on {bus.channel_info}")
 except can.CanError:
     print("Message NOT sent!")
 

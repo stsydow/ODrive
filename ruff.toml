@@ -1,0 +1,32 @@
+# Ruff configuration for the ODrive repo.
+#
+# Firmware/ThirdParty is vendored ST/CMSIS/mbedTLS code, and tools/build is
+# generated build output; exclude both from lint and format so we never touch
+# upstream vendor formatting or rebuilt artifacts.
+
+line-length = 120
+target-version = "py310"
+exclude = ["Firmware/ThirdParty", "tools/build"]
+
+[lint]
+# Python 2 / early-3 compat shims were deliberately dropped during the cleanup;
+# target Python 3.10+ so UP rules stop suggesting pre-3.4 syntax.
+select = ["E", "F", "I", "UP", "B", "RUF", "BLE", "C"]
+
+# These files intentionally use star imports (`from odrive.enums import *`,
+# `from test_runner import *`, `from ctypes import *` in the generated
+# libfibre.py). The imports are deliberate, so fold F403 (star-import) and
+# F405 (usage of a star-imported name) for them only; F821 still catches names
+# that are genuinely undefined everywhere else.
+[lint.per-file-ignores]
+"tools/odrive/tests/*.py" = ["F403", "F405"]
+"tools/odrive/pyfibre/fibre/*.py" = ["F403", "F405"]
+"tools/create_can_dbc.py" = ["F403", "F405"]
+"tools/odrive/utils.py" = ["F403", "F405"]
+"tools/odrive/shell.py" = ["F403", "F405"]
+"tools/odrive/dfu.py" = ["F403", "F405"]
+"tools/run_tests.py" = ["F403", "F405"]
+"tools/setup_hall_as_index.py" = ["F403", "F405"]
+"tools/odrive_demo.py" = ["F403", "F405"]
+"analysis/Simulation/TranslationalMass.py" = ["F403", "F405"]
+"GUI/server/odrive_server.py" = ["F403", "F405"]

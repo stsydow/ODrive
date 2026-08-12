@@ -33,56 +33,54 @@ to publish packages with the name fibre.
 # TODO: add additional y/n prompt to prevent from erroneous upload
 
 from setuptools import setup
-import os
-import sys
 
 # Change this if you already uploaded the current
 # version but need to release a hotfix
 hotfix = 0
 
-#creating_package = "sdist" in sys.argv
+# creating_package = "sdist" in sys.argv
 #
 ## Load version from Git tag
-#import odrive.version
-#version = odrive.version.get_version_str(git_only=creating_package)
+# import odrive.version
+# version = odrive.version.get_version_str(git_only=creating_package)
 #
-#if creating_package and (hotfix > 0 or not version[-1].isdigit()):
+# if creating_package and (hotfix > 0 or not version[-1].isdigit()):
 #  # Add this for hotfixes
 #  version += "-" + str(hotfix)
 #
 #
 ## If we're currently creating the package we need to autogenerate
 ## a file that contains the version string
-#if creating_package:
+# if creating_package:
 #  version_file_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'odrive', 'version.txt')
 #  with open(version_file_path, mode='w') as version_file:
 #    version_file.write(version)
 #
 ## TODO: find a better place for this
-#if not creating_package:
+# if not creating_package:
 #  import platform
 #  if platform.system() == 'Linux':
 #    import odrive.utils
 #    odrive.utils.setup_udev_rules(odrive.utils.Logger())
 
 setup(
-  name = 'fibre',
-  packages = ['fibre'],
-  #scripts = ['..fibre', 'odrivetool.bat', 'odrive_demo.py'],
-  version = '0.0.1dev0',
-  description = 'Abstraction layer for painlessly building object oriented distributed systems that just work',
-  author = 'Samuel Sadok',
-  author_email = 'samuel.sadok@bluewin.ch',
-  license='MIT',
-  url = 'https://github.com/samuelsadok/fibre',
-  keywords = ['communication', 'transport-layer', 'rpc'],
-  install_requires = [],
-  #package_data={'': ['version.txt']},
-  classifiers = [],
+    name="fibre",
+    packages=["fibre"],
+    # scripts = ['..fibre', 'odrivetool.bat', 'odrive_demo.py'],
+    version="0.0.1dev0",
+    description="Abstraction layer for painlessly building object oriented distributed systems that just work",
+    author="Samuel Sadok",
+    author_email="samuel.sadok@bluewin.ch",
+    license="MIT",
+    url="https://github.com/samuelsadok/fibre",
+    keywords=["communication", "transport-layer", "rpc"],
+    install_requires=[],
+    # package_data={'': ['version.txt']},
+    classifiers=[],
 )
 
 # TODO: include README
 
 ## clean up
-#if creating_package:
+# if creating_package:
 #  os.remove(version_file_path)

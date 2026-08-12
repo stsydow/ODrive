@@ -1,4 +1,3 @@
-
 import os
 import sys
 
@@ -10,14 +9,18 @@ import fibre
 
 # Standard convention is to add a __version__ attribute to the package
 from .version import get_version_str
+
 __version__ = get_version_str()
 del get_version_str
 
-from .utils import get_serial_number_str, get_serial_number_str_sync
 import threading
 import time
 
-default_usb_search_path = 'usb:idVendor=0x1209,idProduct=0x0D32,bInterfaceClass=0,bInterfaceSubClass=1,bInterfaceProtocol=0'
+from .utils import get_serial_number_str, get_serial_number_str_sync
+
+default_usb_search_path = (
+    "usb:idVendor=0x1209,idProduct=0x0D32,bInterfaceClass=0,bInterfaceSubClass=1,bInterfaceProtocol=0"
+)
 default_search_path = default_usb_search_path
 
 
@@ -62,11 +65,11 @@ def find_any(path=default_search_path, serial_number=None, cancellation_token=No
     The first call to find_any() will start a background thread that handles
     the backend. This background thread will keep running until the program is
     terminated.
-    
+
     If you want finer grained control over object discovery
     consider using fibre.Domain directly.
     """
-    assert(cancellation_token is None or isinstance(cancellation_token, fibre.Event))
+    assert cancellation_token is None or isinstance(cancellation_token, fibre.Event)
 
     # Start backend if it's not already started
     with _discovery_lock:
@@ -75,9 +78,11 @@ def find_any(path=default_search_path, serial_number=None, cancellation_token=No
             _discovery_started[0] = True
             _discovery_path[0] = path
         elif path != _discovery_path[0]:
-            raise Exception("Cannot change discovery path between multiple find_any() "
-                            "calls: {} != {}. Use fibre.Domain() directly for finer "
-                            "grained discovery control.".format(path, _discovery_path))
+            raise Exception(
+                "Cannot change discovery path between multiple find_any() "
+                f"calls: {path} != {_discovery_path}. Use fibre.Domain() directly for finer "
+                "grained discovery control."
+            )
 
     cancelled = [False]
 
@@ -94,10 +99,10 @@ def find_any(path=default_search_path, serial_number=None, cancellation_token=No
         with _discovery_signal:
             while True:
                 # If the ODrive was already found, return it now
-                for (obj, s) in _objects:
+                for obj, s in _objects:
                     if (serial_number is None) or (serial_number == s):
                         return obj
-                
+
                 current_timeout = None if timeout is None else min(0, timeout - (time.monotonic() - wait_start))
                 _discovery_signal.wait(current_timeout)
 
@@ -109,4 +114,3 @@ def find_any(path=default_search_path, serial_number=None, cancellation_token=No
     finally:
         if cancellation_token:
             cancellation_token.unsubscribe(cancel)
-

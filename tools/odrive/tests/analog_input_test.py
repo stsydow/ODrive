@@ -1,14 +1,6 @@
-
 import test_runner
-
-import time
-import math
-import os
-import numpy as np
-
 from odrive.enums import *
 from test_runner import *
-
 
 teensy_code_template = """
 void setup() {
@@ -35,7 +27,7 @@ void loop() {
 """
 
 
-class TestAnalogInput():
+class TestAnalogInput:
     """
     Verifies the Analog input.
 
@@ -46,7 +38,7 @@ class TestAnalogInput():
                     ___                   ___
     Teensy PWM ----|___|-------o---------|___|----- ODrive Analog Input
                   150 Ohm      |        150 Ohm
-                              === 
+                              ===
                                | 330nF
                                |
                               GND
@@ -57,19 +49,44 @@ class TestAnalogInput():
         for odrive in testrig.get_components(ODriveComponent):
             for odrive_gpio_num, odrive_gpio in [(2, odrive.gpio3), (3, odrive.gpio4)]:
                 alternatives = []
-                lpfs = [(gpio, TestFixture.all_of(tf1, tf2)) for lpf, tf1 in testrig.get_connected_components(odrive_gpio, LowPassFilterComponent)
-                                                             for gpio, tf2 in testrig.get_connected_components(lpf.en, LinuxGpioComponent)]
+                lpfs = [
+                    (gpio, TestFixture.all_of(tf1, tf2))
+                    for lpf, tf1 in testrig.get_connected_components(odrive_gpio, LowPassFilterComponent)
+                    for gpio, tf2 in testrig.get_connected_components(lpf.en, LinuxGpioComponent)
+                ]
                 for lpf, tf1 in lpfs:
                     for teensy_gpio, tf2 in testrig.get_connected_components(odrive_gpio, TeensyGpio):
                         teensy = teensy_gpio.parent
                         for gpio in teensy.gpios:
                             for local_gpio, tf3 in testrig.get_connected_components(gpio, LinuxGpioComponent):
-                                alternatives.append([odrive, lpf, odrive_gpio_num, teensy, teensy_gpio, gpio, local_gpio, TestFixture.all_of(tf1, tf2, tf3)])
+                                alternatives.append(
+                                    [
+                                        odrive,
+                                        lpf,
+                                        odrive_gpio_num,
+                                        teensy,
+                                        teensy_gpio,
+                                        gpio,
+                                        local_gpio,
+                                        TestFixture.all_of(tf1, tf2, tf3),
+                                    ]
+                                )
                 yield AnyTestCase(*alternatives)
 
-
-    def run_test(self, odrive: ODriveComponent, lpf_enable: LinuxGpioComponent, analog_in_num: int, teensy: TeensyComponent, teensy_analog_out: Component, teensy_analog_reset: Component, analog_reset_gpio: LinuxGpioComponent, logger: Logger):
-        code = teensy_code_template.replace("{analog_out}", str(teensy_analog_out.num)).replace("{analog_reset}", str(teensy_analog_reset.num)) #.replace("lpf_enable", str(lpf_enable.num))
+    def run_test(
+        self,
+        odrive: ODriveComponent,
+        lpf_enable: LinuxGpioComponent,
+        analog_in_num: int,
+        teensy: TeensyComponent,
+        teensy_analog_out: Component,
+        teensy_analog_reset: Component,
+        analog_reset_gpio: LinuxGpioComponent,
+        logger: Logger,
+    ):
+        code = teensy_code_template.replace("{analog_out}", str(teensy_analog_out.num)).replace(
+            "{analog_reset}", str(teensy_analog_reset.num)
+        )  # .replace("lpf_enable", str(lpf_enable.num))
         teensy.compile_and_program(code)
         analog_reset_gpio.config(output=True)
         analog_reset_gpio.write(True)
@@ -77,21 +94,21 @@ class TestAnalogInput():
         lpf_enable.write(False)
 
         logger.debug("Set up analog input...")
-        
+
         min_val = -20000
         max_val = 20000
-        period = 1.025 # period in teensy code is 1s, but due to tiny overhead it's a bit longer
+        period = 1.025  # period in teensy code is 1s, but due to tiny overhead it's a bit longer
 
         analog_mapping = [
-            None, #odrive.handle.config.gpio1_analog_mapping,
-            None, #odrive.handle.config.gpio2_analog_mapping,
+            None,  # odrive.handle.config.gpio1_analog_mapping,
+            None,  # odrive.handle.config.gpio2_analog_mapping,
             odrive.handle.config.gpio3_analog_mapping,
             odrive.handle.config.gpio4_analog_mapping,
-            None, #odrive.handle.config.gpio5_analog_mapping,
+            None,  # odrive.handle.config.gpio5_analog_mapping,
         ][analog_in_num]
 
         odrive.disable_mappings()
-        setattr(odrive.handle.config, 'gpio' + str(analog_in_num+1) + '_mode', GPIO_MODE_ANALOG_IN)
+        setattr(odrive.handle.config, "gpio" + str(analog_in_num + 1) + "_mode", GPIO_MODE_ANALOG_IN)
         analog_mapping.endpoint = odrive.handle.axis0.controller._input_pos_property
         analog_mapping.min = min_val
         analog_mapping.max = max_val
@@ -104,10 +121,17 @@ class TestAnalogInput():
         # Expect there to be less than 2% outliers, where an outlier is anything that is more than 5% (of full scale) away from the expected value.
         full_range = abs(max_val - min_val)
         slope, offset, fitted_curve = fit_sawtooth(data, min_val, max_val, sigma=30)
-        test_assert_eq(slope, (max_val - min_val) / period, accuracy=0.005) 
-        test_curve_fit(data, fitted_curve, max_mean_err = full_range * 0.03, inlier_range = full_range * 0.05, max_outliers = len(data[:,0]) * 0.02)
+        test_assert_eq(slope, (max_val - min_val) / period, accuracy=0.005)
+        test_curve_fit(
+            data,
+            fitted_curve,
+            max_mean_err=full_range * 0.03,
+            inlier_range=full_range * 0.05,
+            max_outliers=len(data[:, 0]) * 0.02,
+        )
+
 
 tests = [TestAnalogInput()]
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     test_runner.run(tests)

@@ -7,7 +7,8 @@
 #    http://beyondmeasure.rigoltech.com/acton/attachment/1579/f-03a1/1/-/-/-/-/DP800%20Programming%20Guide.pdf
 #
 
-class Dp800(object):
+
+class Dp800:
     """
     Provides an command and control interface to power supplies implementing
     the USB Test and Measurement Class (TMC) protocol.
@@ -15,22 +16,24 @@ class Dp800(object):
     It was tested on a Rigol DP832 but is likely to work with other USB TMC
     devices too.
     """
+
     def __init__(self, **device_filter):
         # If something doesn't work it sometimes helps to reset the USB device
-        #import usb.core
-        #dev = usb.core.find(idVendor=0x1ab1, idProduct=0x0e11, **device_filter)
-        #dev.reset()
-        #cfg = dev.get_active_configuration()
-        #intf = cfg.interfaces()[0]
-        #usb.util.claim_interface(dev, intf)
-        #ep_in = intf.endpoints()[0]
-        #ep_in = intf.endpoints()[1]
-        #ep_out = intf.endpoints()[2]
+        # import usb.core
+        # dev = usb.core.find(idVendor=0x1ab1, idProduct=0x0e11, **device_filter)
+        # dev.reset()
+        # cfg = dev.get_active_configuration()
+        # intf = cfg.interfaces()[0]
+        # usb.util.claim_interface(dev, intf)
+        # ep_in = intf.endpoints()[0]
+        # ep_in = intf.endpoints()[1]
+        # ep_out = intf.endpoints()[2]
         ##ep_out.write(b"*IDN?\n")
-        #import ipdb; ipdb.set_trace()
-        
+        # import ipdb; ipdb.set_trace()
+
         import usbtmc
-        self._dev = usbtmc.Instrument(0x1ab1, 0x0e11)
+
+        self._dev = usbtmc.Instrument(0x1AB1, 0x0E11)
         self._id = self._dev.ask("*IDN?")
 
     def _get_setpoint(self, channel):
@@ -40,7 +43,7 @@ class Dp800(object):
         Returns: A tuple of the form (voltage, current).
         """
         response = self._dev.ask(f":SOUR{channel}:VOLT?;:SOUR{channel}:CURR?")
-        return tuple((float(v) for v in response.split(";")))
+        return tuple(float(v) for v in response.split(";"))
 
     def _apply(self, channel, voltage, current):
         """
@@ -56,14 +59,16 @@ class Dp800(object):
         Returns: A tuple of the form (voltage, current, power).
         """
         response = self._dev.ask(f":MEAS:ALL? CH{channel}")
-        return tuple((float(v) for v in response.split(",")))
+        return tuple(float(v) for v in response.split(","))
 
-class Dp800Channel(object):
+
+class Dp800Channel:
     """
     Represents one logical power channel on a TMC power supply. This usually
     corresponds to one real channel on the device but can also bundle multiple
     real channels that are connected in series or in parallel.
     """
+
     def __init__(self, device, channels, conn_type):
         """
         channels: A list of channel numbers.
@@ -73,7 +78,7 @@ class Dp800Channel(object):
         """
         self._dev = device
         self._channels = channels
-        self._in_series = {'series': True, 'parallel': False}[conn_type]
+        self._in_series = {"series": True, "parallel": False}[conn_type]
 
     def get_setpoint(self):
         setpoints = [self._dev._get_setpoint(c) for c in self._channels]
@@ -98,7 +103,7 @@ class Dp800Channel(object):
             return setpoint[0], setpoint[1] / len(self._channels), setpoint[2]
         else:
             return setpoint[0] / len(self._channels), setpoint[1], setpoint[2]
-        
+
 
 mydev = Dp800()
-mychannel = Dp800Channel(mydev, [1, 2], 'series')
+mychannel = Dp800Channel(mydev, [1, 2], "series")

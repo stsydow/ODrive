@@ -1,12 +1,12 @@
-
 import hashlib
 import os
 
 from odrive.api_client import ApiClient
 from odrive.crypto import b64encode
 
-class PrivateReleaseApi():
-    BASE_URL = '/releases'
+
+class PrivateReleaseApi:
+    BASE_URL = "/releases"
 
     @staticmethod
     def get_content_key(path: str, commit_hash: str):
@@ -19,12 +19,13 @@ class PrivateReleaseApi():
                         yield os.path.join(*prefix, entry.name)
                     else:
                         yield from _get_file_names(path, prefix + [entry.name])
+
         filenames = sorted(_get_file_names(path, []))
 
         dir_hasher = hashlib.sha256()
-        
+
         for filename in filenames:
-            with open(os.path.join(path, filename), 'rb') as fp:
+            with open(os.path.join(path, filename), "rb") as fp:
                 content = fp.read()
 
             # Calculate commit-invariant hash of the file content
@@ -34,41 +35,53 @@ class PrivateReleaseApi():
             file_hasher = hashlib.sha256()
             file_hasher.update(patched_content)
 
-            dir_hasher.update(filename.encode('utf-8'))
+            dir_hasher.update(filename.encode("utf-8"))
             dir_hasher.update(file_hasher.digest())
 
         return dir_hasher.digest()
 
-    def __init__(self, api_client: 'ApiClient'):
+    def __init__(self, api_client: "ApiClient"):
         self._api_client = api_client
 
     async def get_manifest(self, release_type: str, content_key: bytes):
-        outputs = await self._api_client.call('GET', PrivateReleaseApi.BASE_URL + '/' + release_type + '/manifest', inputs={
-            'content_key': b64encode(content_key),
-        })
+        outputs = await self._api_client.call(
+            "GET",
+            PrivateReleaseApi.BASE_URL + "/" + release_type + "/manifest",
+            inputs={
+                "content_key": b64encode(content_key),
+            },
+        )
         return outputs
 
     async def register_content(self, release_type: str, content_key: bytes, indicated_commit: str):
-        outputs = await self._api_client.call('PUT', PrivateReleaseApi.BASE_URL + '/' + release_type + '/content', inputs={
-            'content_key': b64encode(content_key),
-            'indicated_commit': indicated_commit,
-        })
-        return outputs['created']
+        outputs = await self._api_client.call(
+            "PUT",
+            PrivateReleaseApi.BASE_URL + "/" + release_type + "/content",
+            inputs={
+                "content_key": b64encode(content_key),
+                "indicated_commit": indicated_commit,
+            },
+        )
+        return outputs["created"]
 
     async def register_version(self, release_type: str, version: str, content_key: bytes, **qualifiers):
-        outputs = await self._api_client.call('PUT', PrivateReleaseApi.BASE_URL + '/' + release_type + '/version', inputs={
-            'version': version,
-            'content_key': b64encode(content_key),
-            **qualifiers
-        })
-        return outputs['created']
+        outputs = await self._api_client.call(
+            "PUT",
+            PrivateReleaseApi.BASE_URL + "/" + release_type + "/version",
+            inputs={"version": version, "content_key": b64encode(content_key), **qualifiers},
+        )
+        return outputs["created"]
 
     async def append_to_channel(self, release_type: str, channel: str, version: str):
-        outputs = await self._api_client.call('PUT', PrivateReleaseApi.BASE_URL + '/' + release_type + '/channel', inputs={
-            'channel': channel,
-            'version': version,
-        })
-        return outputs['published']
+        outputs = await self._api_client.call(
+            "PUT",
+            PrivateReleaseApi.BASE_URL + "/" + release_type + "/channel",
+            inputs={
+                "channel": channel,
+                "version": version,
+            },
+        )
+        return outputs["published"]
 
     async def refresh_routes(self, release_type: str):
-        await self._api_client.call('PUT', PrivateReleaseApi.BASE_URL + '/' + release_type + '/refresh-routes')
+        await self._api_client.call("PUT", PrivateReleaseApi.BASE_URL + "/" + release_type + "/refresh-routes")
