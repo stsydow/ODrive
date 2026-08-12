@@ -310,6 +310,89 @@ def unlock_device(serial_number, cancellation_token):
     print(' 4. Put the DFU switch on the ODrive to "RUN"')
 
 
+def _sector_progress(label, items, op):
+    try:
+        for i, item in enumerate(items):
+            print(f"{label}... (sector {i}/{len(items)})  \r", end="", flush=True)
+            op(item)
+        print(f"{label}... done            \r", end="", flush=True)
+    finally:
+        print("", flush=True)
+
+
+def _flash_device(dfudev, hexfile, cancellation_token, logger):
+    """
+    Programs the flash of a device that is in DFU mode, then jumps back to the
+    application. Refuses to start if the hardware version can't be determined,
+    and refuses to erase if the cancellation token is already set (erase is the
+    point of no return: from there the flash must run to completion, so the
+    token is deliberately ignored inside the erase/flash/verify loops).
+    """
+    hw_version = get_hw_version_in_dfu_mode(dfudev)
+    if hw_version is None:
+        logger.error(
+            "Could not determine hardware version. Flashing precompiled "
+            "firmware could lead to unexpected results. Please use an "
+            "STLink/2 to force-update the firmware anyway. Refer to "
+            "https://docs.odriverobotics.com/developer-guide for details."
+        )
+        # Jump to application
+        dfudev.jump_to_application(0x08000000)
+        return
+
+    logger.debug("Sectors on device: ")
+    for sector in dfudev.sectors:
+        logger.debug(
+            " {:08X} to {:08X} ({})".format(sector["addr"], sector["addr"] + sector["len"] - 1, sector["name"])
+        )
+
+    # fill sectors with data
+    touched_sectors = list(populate_sectors(dfudev.sectors, hexfile))
+
+    logger.debug("The following sectors will be flashed: ")
+    for sector, _ in touched_sectors:
+        logger.debug(" {:08X} to {:08X}".format(sector["addr"], sector["addr"] + sector["len"] - 1))
+
+    if cancellation_token.is_set():
+        raise OperationAbortedException()
+
+    # Erase is the point of no return: from here the flash must run to
+    # completion. cancellation_token is checked once, before erasing, and is
+    # deliberately ignored inside the erase/flash/verify loops (aborting between
+    # sectors would leave the device half-erased/half-written).
+    internal_flash_sectors = [sector for sector in dfudev.sectors if sector["name"] == "Internal Flash"]
+    _sector_progress("Erasing", internal_flash_sectors, lambda s: dfudev.erase_sector(s))
+
+    # Flash
+    _sector_progress("Flashing", touched_sectors, lambda sd: dfudev.write_sector(*sd))
+
+    # Verify
+    def verify_sector(sector, expected_data):
+        observed_data = dfudev.read_sector(sector)
+        mismatch_pos = get_first_mismatch_index(observed_data, expected_data)
+        if mismatch_pos is not None:
+            mismatch_pos -= mismatch_pos % 16
+            observed_snippet = " ".join(f"{x:02X}" for x in observed_data[mismatch_pos : mismatch_pos + 16])
+            expected_snippet = " ".join(f"{x:02X}" for x in expected_data[mismatch_pos : mismatch_pos + 16])
+            raise RuntimeError(
+                "Verification failed around address 0x{:08X}:\n".format(sector["addr"] + mismatch_pos)
+                + "  expected: "
+                + expected_snippet
+                + "\n"
+                "  observed: " + observed_snippet
+            )
+
+    _sector_progress("Verifying", touched_sectors, lambda sd: verify_sector(*sd))
+
+    # If the flash operation failed for some reason, your device is bricked now.
+    # You can unbrick it as long as the device remains powered on.
+    # (or always with an STLink)
+    # So for debugging you should comment this last part out.
+
+    # Jump to application
+    dfudev.jump_to_application(0x08000000)
+
+
 def update_device(device, firmware, logger, cancellation_token):
     """
     Updates the specified device with the specified firmware.
@@ -335,10 +418,11 @@ def update_device(device, firmware, logger, cancellation_token):
         dfudev = None
 
         # Read hardware version as reported from firmware
-        hw_version_major = device.hw_version_major if hasattr(device, "hw_version_major") else 0
-        hw_version_minor = device.hw_version_minor if hasattr(device, "hw_version_minor") else 0
-        hw_version_variant = device.hw_version_variant if hasattr(device, "hw_version_variant") else 0
-        hw_version = (hw_version_major, hw_version_minor, hw_version_variant)
+        hw_version = (
+            getattr(device, "hw_version_major", 0),
+            getattr(device, "hw_version_minor", 0),
+            getattr(device, "hw_version_variant", 0),
+        )
 
     if hw_version < (3, 5, 0):
         print("  DFU mode is not supported on board version 3.4 or earlier.")
@@ -348,11 +432,13 @@ def update_device(device, firmware, logger, cancellation_token):
         if not odrive.utils.yes_no_prompt("Do you still want to continue?", False):
             raise OperationAbortedException()
 
-    fw_version_major = device.fw_version_major if hasattr(device, "fw_version_major") else 0
-    fw_version_minor = device.fw_version_minor if hasattr(device, "fw_version_minor") else 0
-    fw_version_revision = device.fw_version_revision if hasattr(device, "fw_version_revision") else 0
-    fw_version_prerelease = device.fw_version_unreleased != 0 if hasattr(device, "fw_version_unreleased") else True
-    fw_version = (fw_version_major, fw_version_minor, fw_version_revision, fw_version_prerelease)
+    fw_unreleased = getattr(device, "fw_version_unreleased", None)
+    fw_version = (
+        getattr(device, "fw_version_major", 0),
+        getattr(device, "fw_version_minor", 0),
+        getattr(device, "fw_version_revision", 0),
+        True if fw_unreleased is None else fw_unreleased != 0,
+    )
 
     print(
         "Found ODrive {} ({}) with firmware {}{}".format(
@@ -363,6 +449,7 @@ def update_device(device, firmware, logger, cancellation_token):
         )
     )
 
+    online_update = firmware is None
     if firmware is None:
         if hw_version == (0, 0, 0):
             if dfudev is None:
@@ -379,20 +466,29 @@ def update_device(device, firmware, logger, cancellation_token):
             raise Exception("could not find any firmware release for this board version")
         print(f" found {get_fw_version_string(firmware.fw_version)}")
 
-    if firmware.fw_version <= fw_version:
-        print()
-        if firmware.fw_version < fw_version:
-            print(
-                f"Warning: you are about to flash firmware {get_fw_version_string(firmware.fw_version)} "
-                f"which is older than the firmware on the device ({get_fw_version_string(fw_version)})."
-            )
-        else:
-            print(
-                f"You are about to flash firmware {get_fw_version_string(firmware.fw_version)} "
-                f"which is the same version as the firmware on the device ({get_fw_version_string(fw_version)})."
-            )
-        if not odrive.utils.yes_no_prompt("Do you want to flash this firmware anyway?", False):
-            raise OperationAbortedException()
+    if found_in_dfu:
+        # The bootloader doesn't report the installed firmware version.
+        logger.info("device is in DFU mode: installed firmware version unknown, skipping the downgrade check")
+    elif online_update and fw_version[:3] != (0, 0, 0):
+        # Firmware.is_newer() ranks a prerelease below the release of the same
+        # numbers and returns False on unknown (0,0,0) versions, so the prompt
+        # never fires for an unknown device version.
+        target_older = Firmware.is_newer(fw_version, firmware.fw_version)
+        target_newer = Firmware.is_newer(firmware.fw_version, fw_version)
+        if target_older or not target_newer:
+            print()
+            if target_older:
+                print(
+                    f"Warning: you are about to flash firmware {get_fw_version_string(firmware.fw_version)} "
+                    f"which is older than the firmware on the device ({get_fw_version_string(fw_version)})."
+                )
+            else:
+                print(
+                    f"You are about to flash firmware {get_fw_version_string(firmware.fw_version)} "
+                    f"which is the same version as the firmware on the device ({get_fw_version_string(fw_version)})."
+                )
+            if not odrive.utils.yes_no_prompt("Do you want to flash this firmware anyway?", False):
+                raise OperationAbortedException()
 
     # load hex file
     # TODO: Either use the elf format or pack a custom format with a manifest.
@@ -425,79 +521,7 @@ def update_device(device, firmware, logger, cancellation_token):
         find_odrive_cancellation_token.set()
         dfudev = DfuDevice(stm_device)
 
-    hw_version = get_hw_version_in_dfu_mode(dfudev)
-    if hw_version is None:
-        logger.error(
-            "Could not determine hardware version. Flashing precompiled "
-            "firmware could lead to unexpected results. Please use an "
-            "STLink/2 to force-update the firmware anyway. Refer to "
-            "https://docs.odriverobotics.com/developer-guide for details."
-        )
-        # Jump to application
-        dfudev.jump_to_application(0x08000000)
-        return
-
-    logger.debug("Sectors on device: ")
-    for sector in dfudev.sectors:
-        logger.debug(
-            " {:08X} to {:08X} ({})".format(sector["addr"], sector["addr"] + sector["len"] - 1, sector["name"])
-        )
-
-    # fill sectors with data
-    touched_sectors = list(populate_sectors(dfudev.sectors, hexfile))
-
-    logger.debug("The following sectors will be flashed: ")
-    for sector, _ in touched_sectors:
-        logger.debug(" {:08X} to {:08X}".format(sector["addr"], sector["addr"] + sector["len"] - 1))
-
-    # Erase
-    try:
-        internal_flash_sectors = [sector for sector in dfudev.sectors if sector["name"] == "Internal Flash"]
-        for i, sector in enumerate(dfudev.sectors):
-            if sector["name"] == "Internal Flash":
-                print(f"Erasing... (sector {i}/{len(internal_flash_sectors)})  \r", end="", flush=True)
-                dfudev.erase_sector(sector)
-        print("Erasing... done            \r", end="", flush=True)
-    finally:
-        print("", flush=True)
-
-    # Flash
-    try:
-        for i, (sector, data) in enumerate(touched_sectors):
-            print(f"Flashing... (sector {i}/{len(touched_sectors)})  \r", end="", flush=True)
-            dfudev.write_sector(sector, data)
-        print("Flashing... done            \r", end="", flush=True)
-    finally:
-        print("", flush=True)
-
-    # Verify
-    try:
-        for i, (sector, expected_data) in enumerate(touched_sectors):
-            print(f"Verifying... (sector {i}/{len(touched_sectors)})  \r", end="", flush=True)
-            observed_data = dfudev.read_sector(sector)
-            mismatch_pos = get_first_mismatch_index(observed_data, expected_data)
-            if mismatch_pos is not None:
-                mismatch_pos -= mismatch_pos % 16
-                observed_snippet = " ".join(f"{x:02X}" for x in observed_data[mismatch_pos : mismatch_pos + 16])
-                expected_snippet = " ".join(f"{x:02X}" for x in expected_data[mismatch_pos : mismatch_pos + 16])
-                raise RuntimeError(
-                    "Verification failed around address 0x{:08X}:\n".format(sector["addr"] + mismatch_pos)
-                    + "  expected: "
-                    + expected_snippet
-                    + "\n"
-                    "  observed: " + observed_snippet
-                )
-        print("Verifying... done            \r", end="", flush=True)
-    finally:
-        print("", flush=True)
-
-    # If the flash operation failed for some reason, your device is bricked now.
-    # You can unbrick it as long as the device remains powered on.
-    # (or always with an STLink)
-    # So for debugging you should comment this last part out.
-
-    # Jump to application
-    dfudev.jump_to_application(0x08000000)
+    _flash_device(dfudev, hexfile, cancellation_token, logger)
 
     if not found_in_dfu:
         logger.info("Waiting for the device to reappear...")
@@ -505,14 +529,15 @@ def update_device(device, firmware, logger, cancellation_token):
 
         if do_backup_config:
             temp_config_filename = odrive.configuration.get_temp_config_filename(device)
-            odrive.configuration.restore_config(device, None, logger)
-            os.remove(temp_config_filename)
+            try:
+                odrive.configuration.restore_config(device, None, logger)
+            finally:
+                os.remove(temp_config_filename)
 
         logger.success("Device firmware update successful.")
     else:
         logger.success("Firmware upload successful.")
         logger.info('To complete the firmware update, set the DFU switch to "RUN" and power cycle the board.')
-
 
 def launch_dfu(args, logger, cancellation_token):
     """
@@ -563,3 +588,15 @@ def launch_dfu(args, logger, cancellation_token):
 # < 00009fc0  9e 46 70 47 00 00 00 00  52 20 96 3c 46 76 50 76  |.FpG....R .<FvPv|
 # ---
 # > 00009fc0  9e 46 70 47 ff ff ff ff  52 20 96 3c 46 76 50 76  |.FpG....R .<FvPv|
+
+
+if __name__ == "__main__":
+    # Self-check for the firmware version ordering used by the downgrade prompt.
+    assert Firmware.is_newer((1, 2, 3, False), (1, 2, 3, True))  # release > same-number prerelease
+    assert not Firmware.is_newer((1, 2, 3, True), (1, 2, 3, False))
+    assert Firmware.is_newer((1, 2, 4, False), (1, 2, 3, True))  # newer number wins over prerelease tag
+    assert Firmware.is_newer((1, 2, 3, True), (1, 2, 2, False))
+    assert not Firmware.is_newer((0, 0, 0, True), (1, 2, 3, False))  # unknown never compares
+    assert not Firmware.is_newer((1, 2, 3, False), (0, 0, 0, True))
+    assert not Firmware.is_newer((1, 2, 3, False), (1, 2, 3, False))  # equal not newer
+    print("Firmware.is_newer self-check passed")
