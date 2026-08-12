@@ -17,6 +17,7 @@ from type_info import (
     FunctionInfo,
     ResolvedTypeRef,
     TypeInfo,
+    _promote_type_fields,
 )
 from type_registry import NamespaceInfo, TypeNameRef, TypeRegistry
 
@@ -166,20 +167,7 @@ class Loader:
                     attr_data = {"type": attr_data}
                 elif "type" not in attr_data:
                     attr_data["type"] = {}
-                    if "attributes" in attr_data:
-                        attr_data["type"]["attributes"] = attr_data.pop("attributes")
-                    if "functions" in attr_data:
-                        attr_data["type"]["functions"] = attr_data.pop("functions")
-                    if "implements" in attr_data:
-                        attr_data["type"]["implements"] = attr_data.pop("implements")
-                    if "c_is_class" in attr_data:
-                        attr_data["type"]["c_is_class"] = attr_data.pop("c_is_class")
-                    if "values" in attr_data:
-                        attr_data["type"]["values"] = attr_data.pop("values")
-                    if "flags" in attr_data:
-                        attr_data["type"]["flags"] = attr_data.pop("flags")
-                    if "nullflag" in attr_data:
-                        attr_data["type"]["nullflag"] = attr_data.pop("nullflag")
+                    _promote_type_fields(attr_data)
 
                 if isinstance(attr_data["type"], str):
                     if attr_data["type"].startswith("readonly "):
@@ -210,6 +198,7 @@ class Loader:
                 )
 
             return cls
+
 
     def load_from_data(self, data):
         using = [tuple(u.split(".")) for u in (data.get("using", None) or [])]

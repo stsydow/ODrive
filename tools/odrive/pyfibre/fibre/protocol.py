@@ -288,39 +288,42 @@ class Channel(PacketSink):
         packet = packet + struct.pack("<H", trailer)
 
         if expect_ack:
-            ack_event = Event()
-            self._expected_acks[seq_no] = ack_event
-            try:
-                attempt = 0
-                while attempt < self._send_attempts:
-                    self._my_lock.acquire()
-                    try:
-                        self._output.process_packet(packet)
-                    except ChannelDamagedException:
-                        attempt += 1
-                        continue  # resend
-                    except TimeoutError:
-                        attempt += 1
-                        continue  # resend
-                    finally:
-                        self._my_lock.release()
-                    # Wait for ACK until the resend timeout is exceeded
-                    try:
-                        if wait_any(self._resend_timeout, ack_event, self._channel_broken) != 0:
-                            raise ObjectLostError()
-                    except TimeoutError:
-                        attempt += 1
-                        continue  # resend
-                    return self._responses.pop(seq_no)
-                    # TODO: record channel statistics
-                raise ObjectLostError()  # Too many resend attempts
-            finally:
-                self._expected_acks.pop(seq_no)
-                self._responses.pop(seq_no, None)
+            return self._send_and_wait_ack(packet, seq_no)
         else:
             # fire and forget
             self._output.process_packet(packet)
             return None
+
+    def _send_and_wait_ack(self, packet, seq_no):
+        ack_event = Event()
+        self._expected_acks[seq_no] = ack_event
+        try:
+            attempt = 0
+            while attempt < self._send_attempts:
+                self._my_lock.acquire()
+                try:
+                    self._output.process_packet(packet)
+                except ChannelDamagedException:
+                    attempt += 1
+                    continue  # resend
+                except TimeoutError:
+                    attempt += 1
+                    continue  # resend
+                finally:
+                    self._my_lock.release()
+                # Wait for ACK until the resend timeout is exceeded
+                try:
+                    if wait_any(self._resend_timeout, ack_event, self._channel_broken) != 0:
+                        raise ObjectLostError()
+                except TimeoutError:
+                    attempt += 1
+                    continue  # resend
+                return self._responses.pop(seq_no)
+                # TODO: record channel statistics
+            raise ObjectLostError()  # Too many resend attempts
+        finally:
+            self._expected_acks.pop(seq_no)
+            self._responses.pop(seq_no, None)
 
     def remote_endpoint_read_buffer(self, endpoint_id):
         """

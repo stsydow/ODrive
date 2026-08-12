@@ -9,6 +9,7 @@ from collections import OrderedDict
 import jinja2
 import jsonschema
 import yaml
+from type_info import _promote_type_fields
 
 # This schema describes what we expect interface definition files to look like
 validator = jsonschema.Draft4Validator(
@@ -266,20 +267,7 @@ def regularize_attribute(parent, name, elem, c_is_class):
         elem = {"type": elem}
     elif "type" not in elem:
         elem["type"] = {}
-        if "attributes" in elem:
-            elem["type"]["attributes"] = elem.pop("attributes")
-        if "functions" in elem:
-            elem["type"]["functions"] = elem.pop("functions")
-        if "implements" in elem:
-            elem["type"]["implements"] = elem.pop("implements")
-        if "c_is_class" in elem:
-            elem["type"]["c_is_class"] = elem.pop("c_is_class")
-        if "values" in elem:
-            elem["type"]["values"] = elem.pop("values")
-        if "flags" in elem:
-            elem["type"]["flags"] = elem.pop("flags")
-        if "nullflag" in elem:
-            elem["type"]["nullflag"] = elem.pop("nullflag")
+        _promote_type_fields(elem)
 
     elem["name"] = name
     elem["fullname"] = join_name(parent.fullname, name)

@@ -1,6 +1,13 @@
 from abc import ABC, abstractmethod
 
 
+def _promote_type_fields(elem):
+    # Move sibling keys (attributes/functions/...) into elem["type"]
+    for key in ("attributes", "functions", "implements", "c_is_class", "values", "flags", "nullflag"):
+        if key in elem:
+            elem["type"][key] = elem.pop(key)
+
+
 class TypeInfo:
     pass
 
