@@ -29,6 +29,19 @@ def test_dialogs_and_combos_present(qml):
     assert _find_qml(root, "inputCombo") is not None
 
 
+def test_device_info_dialog_fetches_on_open(qml, backend):
+    """The info text must be read when the dialog opens (device online), not
+    frozen at the startup snapshot — regression for the 'Not connected'
+    label shown while online."""
+    root = qml.rootObjects()[0]
+    dialog = _find_qml(root, "deviceInfoDialog")
+    dialog.setProperty("visible", True)
+    _process_events(qml)
+    label = _find_qml(root, "deviceInfoLabel")
+    assert "Serial number" in label.property("text")
+    assert "Not connected" not in label.property("text")
+
+
 def _process_events(qml):
     loop = QEventLoop()
     QTimer.singleShot(0, loop.quit)

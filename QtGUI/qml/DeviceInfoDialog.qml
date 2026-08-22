@@ -14,15 +14,23 @@ Window {
     height: layout.implicitHeight + layout.anchors.margins * 2
     modality: Qt.ApplicationModal
 
+    onVisibleChanged:
+        if (visible) infoLabel.text = backend.deviceInfoText()
+
     ColumnLayout {
         id: layout
         anchors.fill: parent
         anchors.margins: 6
         Label {
+            id: infoLabel
+            objectName: "deviceInfoLabel"
             Layout.fillWidth: true
             Layout.preferredWidth: 380
             Layout.preferredHeight: 80
-            text: backend.deviceInfoText()
+            // Fetched on open via onVisibleChanged below — deviceInfoText()
+            // has no notify signal, so a binding here would freeze at the
+            // startup snapshot ("Not connected") forever.
+            text: ""
             wrapMode: Text.Wrap
         }
         RowLayout {
