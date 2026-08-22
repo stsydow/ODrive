@@ -21,6 +21,8 @@ code and below).
   The GUI reads the state on connect and periodically to reflect the device state.
   It commands the device only through explicit user actions.
   Connect/disconnect transitions only tear down GUI references — there are **no implicit writes**.
+  (One deliberate nuance: explicitly switching the control mode steers an
+  incompatible input mode to the new mode's default — still a user-initiated write.)
 - **Setpoint and parameter changes are applied only on explicit confirmation** (Apply button or Enter key).
   Adjusting a setpoint field never commands the motor; only a confirmed apply sends it.
 
@@ -105,7 +107,7 @@ so QML accesses it by name everywhere (menus, rows, dialogs); a second context p
 - **Slots** — `run()`, `stop()`, `startState(name)`, `setMode(name)`,
   `setInputMode(idx)`, `setActiveSetpoint(v)`, `applySetpoint()`, `setConfig/getConfig/hasConfig`,
   `save/export/importConfig`, `reboot`, `clearErrors`, `exportLog`, `deviceInfoText`,
-  `setVerbose`, `forceReconnect`.
+  `setVerbose`.
 - **Sync, not write-through** — a setpoint row's `DoubleSpinBox` is *not* bound to the
   device; user edits stay local (`setActiveSetpoint`) and reach the device only on
   `applySetpoint()` / Enter. The box re-syncs from `backend` on the setpoint-changed

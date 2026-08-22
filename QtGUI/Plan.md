@@ -202,7 +202,7 @@ property `backend`:
 | `backend.setMode(name)`, `inputModes`, `setInputMode(idx)` | mode/input-mode change + selector population |
 | `backend.setConfig/getConfig/hasConfig(base, attr, ...)` | settings read/write + `hasattr` gating |
 | `backend.logEvent(cat, msg)`, signal `logUpdated`, `logText` | event log + live viewer |
-| `backend.save/export/importConfig()`, `reboot()`, `clearErrors()`, `exportLog()`, `deviceInfoText()`, `forceReconnect()`, `setVerbose()` | menu/footer actions (`QFileDialog`/`QMessageBox` native) |
+| `backend.save/export/importConfig()`, `reboot()`, `clearErrors()`, `exportLog()`, `deviceInfoText()`, `setVerbose()` | menu/footer actions (`QFileDialog`/`QMessageBox` native) |
 
 #### 2.5.2 Main window (`qml/main.qml`) ✅
 

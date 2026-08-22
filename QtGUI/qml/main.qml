@@ -32,7 +32,7 @@ ApplicationWindow {
             }
             MenuItem { text: "Event Log…"; onTriggered: eventLogDialog.show() }
             MenuSeparator {}
-            MenuItem { text: "Force Reconnect"; onTriggered: backend.forceReconnect() }
+            MenuItem { text: "Force Reconnect"; onTriggered: backend.connectOdrive() }
         }
     }
 

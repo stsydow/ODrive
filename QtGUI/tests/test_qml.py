@@ -6,6 +6,7 @@ selector coupling. They use the offscreen platform, so no display or hardware
 is required.
 """
 
+from odrive.enums import INPUT_MODE_POS_FILTER, INPUT_MODE_TRAP_TRAJ
 from PySide6.QtCore import QEventLoop, QObject, QTimer
 
 
@@ -46,8 +47,15 @@ def test_input_mode_combo_links_to_control_mode(qml, backend):
     input_combo = _find_qml(root, "inputCombo")
     _process_events(qml)
     assert input_combo.property("currentText") == "Velocity Ramp"
-    # Switch control mode on the backend; the input-mode selector must follow.
+    # Explicit control-mode switch: device still runs VEL_RAMP (2), which
+    # position mode doesn't list — setMode() steers it to the mode default.
     backend.setMode("Position Control")
     _process_events(qml)
     assert input_combo.property("currentText") == "Trapezoidal Trajectory"
     assert input_combo.property("count") == 3
+    assert backend.odrive.axis0.controller.config.input_mode == INPUT_MODE_TRAP_TRAJ
+    # An explicit user pick writes the device directly.
+    backend.setInputMode(0)
+    _process_events(qml)
+    assert input_combo.property("currentText") == "Position Filter"
+    assert backend.odrive.axis0.controller.config.input_mode == INPUT_MODE_POS_FILTER

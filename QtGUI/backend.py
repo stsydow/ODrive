@@ -34,9 +34,10 @@ from odrive.enums import (
     INPUT_MODE_VEL_RAMP,
 )
 from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from errors import DEVICE_EXCEPTIONS
-from eventlog import LogEntry
+from eventlog import LogEntry, format_log
 from status_backend import STATE_MAP, StatusBackend
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,7 @@ class GuiBackend(QObject):
     setpointChanged = Signal()        # vel/torque/pos setpoints
     verboseChanged = Signal()         # verbose
     logUpdated = Signal()             # a LogEntry was appended
+    errorsChanged = Signal()
 
     def __init__(self, verbose=False):
         super().__init__()
@@ -165,8 +167,6 @@ class GuiBackend(QObject):
     @Property(str, notify=estimatesChanged)
     def posEstimateText(self):
         return self._pos_est_text
-
-    errorsChanged = Signal()
 
     # -- connection lifecycle ------------------------------------------
 
@@ -290,10 +290,21 @@ class GuiBackend(QObject):
             controller.config.control_mode = new_mode
             self._active_mode_enum = new_mode
             self._write_active_setpoint()  # seed the new mode's input
+            self._steer_input_mode(controller, new_mode)
             self._sync_mode()
             self.logEvent("MODE", f"control mode -> {name}")
         except DEVICE_EXCEPTIONS as e:
             self.logEvent("MODE", f"failed to set mode {name}: {e}")
+
+    def _steer_input_mode(self, controller, control_mode):
+        """Explicit user action: if the device's current input mode isn't
+        listed for the new control mode, move it to that mode's default."""
+        allowed = MODES_BY_CONTROL.get(control_mode)
+        if allowed and controller.config.input_mode not in allowed:
+            try:
+                controller.config.input_mode = DEFAULT_BY_CONTROL.get(control_mode, allowed[0])
+            except DEVICE_EXCEPTIONS as e:
+                logger.warning("failed to default input_mode: %s", e)
 
     @Slot(float)
     def setActiveSetpoint(self, value):
@@ -348,7 +359,8 @@ class GuiBackend(QObject):
     # -- input-mode selection ------------------------------------------
 
     def _input_mode_model_for(self, control_mode):
-        controller = self._axis().controller if self._axis() is not None else None
+        axis = self._axis()
+        controller = axis.controller if axis is not None else None
         if control_mode is None or controller is None:
             self._input_modes = []
             self._input_mode_values = []
@@ -356,20 +368,19 @@ class GuiBackend(QObject):
             self.inputModeModelChanged.emit()
             return
         allowed = MODES_BY_CONTROL.get(control_mode, [INPUT_MODE_PASSTHROUGH])
-        cur = controller.config.input_mode
-        if cur is not None and cur in allowed and cur != INPUT_MODE_PASSTHROUGH:
-            select = cur
-        else:
-            select = DEFAULT_BY_CONTROL.get(control_mode, allowed[0])
+        try:
+            cur = controller.config.input_mode
+        except DEVICE_EXCEPTIONS:  # device dropped mid-read
+            return
+        select = allowed.index(cur) if cur in allowed else -1  # -1: device runs a mode we don't list
         self._input_mode_values = list(allowed)
         self._input_modes = [INPUT_MODES[v] for v in allowed]
-        self._input_mode_index = allowed.index(select)
+        self._input_mode_index = select
         self.inputModeModelChanged.emit()
-        if cur is not None and select != cur:
-            try:
-                controller.config.input_mode = select
-            except DEVICE_EXCEPTIONS as e:
-                logger.warning("failed to set input_mode: %s", e)
+        # Model-building only: never write input_mode here — connect/poll are
+        # read paths (ARCHITECTURE.md forbids implicit writes). Defaulting to
+        # the control mode's standard input happens in setMode(), which is an
+        # explicit user action.
 
     @Slot(int)
     def setInputMode(self, index):
@@ -458,14 +469,12 @@ class GuiBackend(QObject):
             self.odrive.save_configuration()
             self.logEvent("CFG", "saved config to NVM")
         except DEVICE_EXCEPTIONS as e:
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(None, "Save Error", f"Failed to save configuration: {e}")
 
     @Slot()
     def exportConfig(self):
         if self.odrive is None:
             return
-        from PySide6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getSaveFileName(
             None, "Export Configuration", "", "JSON Files (*.json);;All Files (*)")
         if not path:
@@ -474,14 +483,12 @@ class GuiBackend(QObject):
             odrive.configuration.backup_config(self.odrive, path, logger)
             self.logEvent("CFG", f"exported config to {path}")
         except DEVICE_EXCEPTIONS as e:
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(None, "Export Error", f"Failed to export configuration: {e}")
 
     @Slot()
     def importConfig(self):
         if self.odrive is None:
             return
-        from PySide6.QtWidgets import QFileDialog, QMessageBox
         path, _ = QFileDialog.getOpenFileName(
             None, "Import Configuration", "", "JSON Files (*.json);;All Files (*)")
         if not path:
@@ -502,7 +509,6 @@ class GuiBackend(QObject):
     def reboot(self):
         if self.odrive is None:
             return
-        from PySide6.QtWidgets import QMessageBox
         reply = QMessageBox.question(
             None, "Confirm Reboot", "Reboot the ODrive device?",
             QMessageBox.Yes | QMessageBox.No)
@@ -527,13 +533,7 @@ class GuiBackend(QObject):
             self.verboseChanged.emit()
         self.logEvent("APP", f"verbose logging {'enabled' if checked else 'disabled'}")
 
-    @Slot()
-    def forceReconnect(self):
-        self.connectOdrive()
-
-    # -- dialogs (widget-based until 2.5.4) ----------------------------
-
-    # -- QML dialog data (2.5.4) --------------------------------------
+    # -- QML dialog data ----------------------------------------------
 
     @Slot(result=str)
     def deviceInfoText(self):
@@ -541,14 +541,14 @@ class GuiBackend(QObject):
             return "Not connected"
         try:
             serial = odrive.get_serial_number_str_sync(self.odrive)
+            parts = (self.odrive.fw_version_major, self.odrive.fw_version_minor,
+                     self.odrive.fw_version_revision)
+            hw_major, hw_minor, hw_variant = (self.odrive.hw_version_major,
+                                              self.odrive.hw_version_minor,
+                                              self.odrive.hw_version_variant)
         except DEVICE_EXCEPTIONS:
-            serial = "unknown"
-        parts = (self.odrive.fw_version_major, self.odrive.fw_version_minor,
-                 self.odrive.fw_version_revision)
+            return "Device lost while reading info"
         fw = ".".join(str(x) for x in parts) if None not in parts else "unknown"
-        hw_major, hw_minor, hw_variant = (self.odrive.hw_version_major,
-                                          self.odrive.hw_version_minor,
-                                          self.odrive.hw_version_variant)
         hw = "unknown"
         if hw_major is not None and hw_minor is not None:
             hw = f"v{hw_major}.{hw_minor}"
@@ -564,7 +564,6 @@ class GuiBackend(QObject):
 
     @Property(str, notify=logUpdated)
     def logText(self):
-        from eventlog import format_log
         return format_log(self.event_log)
 
     @Slot()
@@ -579,7 +578,6 @@ class GuiBackend(QObject):
 
     @Slot()
     def exportLog(self):
-        from PySide6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getSaveFileName(
             None, "Export Log", "odrive_log.txt",
             "Text Files (*.txt);;All Files (*)")

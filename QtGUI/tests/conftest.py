@@ -22,15 +22,10 @@ import odrive  # noqa: E402,F401  (import side effects: register discovery/types
 import pytest  # noqa: E402
 from PySide6.QtCore import QUrl  # noqa: E402
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
+from PySide6.QtQuickControls2 import QQuickStyle  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from backend import GuiBackend  # noqa: E402
-
-try:
-    from PySide6.QtQuickControls2 import QQuickStyle
-except ImportError:  # pragma: no cover - older PySide6 without the module
-    QQuickStyle = None
-
 
 # ── Mock ODrive device ──────────────────────────────────────────────────
 # Faithful enough to exercise GuiBackend's controls without hardware: a

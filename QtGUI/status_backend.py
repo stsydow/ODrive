@@ -23,6 +23,9 @@ STATE_MAP = {
     "Lock-In Spin": odrive.enums.AXIS_STATE_LOCKIN_SPIN,
 }
 
+# Reverse lookup for calibration-state labels (value -> "Full Calibration Sequence" ...)
+_CALIB_LABELS = {v: k for k, v in STATE_MAP.items()}
+
 def _state_display(value):
     if value in (odrive.enums.AXIS_STATE_IDLE, odrive.enums.AXIS_STATE_UNDEFINED):
         return "Idle"
@@ -34,10 +37,7 @@ def _state_display(value):
         return "Homing"
     short = AXIS_STATE_NAMES.get(value)
     if short and any(k in short for k in ("CALIBRATION", "DIR_FIND", "INDEX_SEARCH", "LOCKIN")):
-        for label, enum_val in STATE_MAP.items():
-            if enum_val == value:
-                return "Calibration: " + label
-        return "Calibration: " + short.replace("_", " ").title()
+        return "Calibration: " + _CALIB_LABELS.get(value, short.replace("_", " ").title())
     return short or str(value)
 
 class StatusBackend(QObject):

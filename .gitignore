@@ -66,3 +66,4 @@ GUI/build
 
 docs/reStructuredText/_build/
 tools/odrive-cansimple.ini
+.aider*
