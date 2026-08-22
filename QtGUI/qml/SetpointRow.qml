@@ -48,4 +48,19 @@ RowLayout {
             spin.value = control.backendValue
         }
     }
+
+    // Enter confirms the edit and applies it to the device (Apply button
+    // equivalent). Hook the inner TextInput's accepted() — it consumes Return,
+    // so Keys.* on the spinbox never see it. Parse the displayed text here:
+    // relying on SpinBox's internal commit order made the first Enter apply
+    // the previously stored value.
+    Connections {
+        target: spin.contentItem
+        function onAccepted() {
+            // locale arg required: without it valueFromText's default impl
+            // calls Number.fromLocaleString(undefined, ...) -> hard error.
+            backend.setActiveSetpoint(spin.valueFromText(spin.contentItem.text, Qt.locale()))
+            backend.applySetpoint()
+        }
+    }
 }

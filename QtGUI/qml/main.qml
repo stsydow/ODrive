@@ -39,6 +39,13 @@ ApplicationWindow {
     // Status footer pinned to the bottom of the window (like QStatusBar).
     footer: StatusBar {}
 
+    // Esc = emergency-ish stop to Idle (monitor-only GUI; firmware enforces
+    // limits). backend.stop() no-ops when disconnected.
+    Shortcut {
+        sequence: "Esc"
+        onActivated: backend.stop()
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 8
@@ -75,8 +82,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             title: "Control Command"
             // Disable the whole subtree (mode/input combos, setpoint rows,
-            // Apply) when there is no device; setpoint rows add a finer
-            // closed-loop gate via backend.closedLoop below.
+            // Apply) when there is no device.
             enabled: statusBackend.connected
             ColumnLayout {
                 anchors.fill: parent
@@ -102,30 +108,33 @@ ApplicationWindow {
                     Item { Layout.fillWidth: true }
                 }
 
-                // Velocity / Torque / Position rows — only active visible
+                // Velocity / Torque / Position rows — only active visible.
+                // Editable + applicable whenever connected: pre-setting a
+                // setpoint in Idle is the whole point (else every start
+                // reuses the last applied value).
                 SetpointRow {
+                    objectName: "velSetpoint"
                     label: "Velocity Setpoint (rps):"
                     backendValue: backend.velSetpoint
                     estimate: backend.velEstimateText
                     pointMin: -100; pointMax: 100; decimals: 3; step: 0.1
-                    enabled: backend.closedLoop
                     visible: backend.currentMode === 0
                     onCommitted: function(v) { backend.setActiveSetpoint(v) }
                 }
                 SetpointRow {
+                    objectName: "torqueSetpoint"
                     label: "Torque Setpoint (A):"
                     backendValue: backend.torqueSetpoint
                     pointMin: -10; pointMax: 10; decimals: 3; step: 0.1
-                    enabled: backend.closedLoop
                     visible: backend.currentMode === 2
                     onCommitted: function(v) { backend.setActiveSetpoint(v) }
                 }
                 SetpointRow {
+                    objectName: "posSetpoint"
                     label: "Position Setpoint (rev):"
                     backendValue: backend.posSetpoint
                     estimate: backend.posEstimateText
                     pointMin: -1e6; pointMax: 1e6; decimals: 4; step: 0.01
-                    enabled: backend.closedLoop
                     visible: backend.currentMode === 1
                     onCommitted: function(v) { backend.setActiveSetpoint(v) }
                 }
@@ -133,7 +142,6 @@ ApplicationWindow {
                 RowLayout {
                     Button {
                         text: "Apply Setpoint"
-                        enabled: backend.closedLoop
                         onClicked: backend.applySetpoint()
                     }
                     Item { Layout.fillWidth: true }
