@@ -297,12 +297,18 @@ class GuiBackend(QObject):
             self.logEvent("MODE", f"failed to set mode {name}: {e}")
 
     def _steer_input_mode(self, controller, control_mode):
-        """Explicit user action: if the device's current input mode isn't
-        listed for the new control mode, move it to that mode's default."""
+        """Explicit user action: on a control-mode switch, move the device to
+        the new mode's default input mode unless it already runs one of that
+        mode's ramp/filter modes. Passthrough counts as "not set" here — it is
+        a valid choice to keep while browsing, but a mode change overrides it."""
         allowed = MODES_BY_CONTROL.get(control_mode)
-        if allowed and controller.config.input_mode not in allowed:
+        cur = controller.config.input_mode
+        if allowed and (cur not in allowed or cur == INPUT_MODE_PASSTHROUGH):
+            default = DEFAULT_BY_CONTROL.get(control_mode, allowed[0])
             try:
-                controller.config.input_mode = DEFAULT_BY_CONTROL.get(control_mode, allowed[0])
+                controller.config.input_mode = default
+                self.logEvent("MODE", f"input mode -> {INPUT_MODES[default]} "
+                                      f"(default for {MODE_NAMES[control_mode]})")
             except DEVICE_EXCEPTIONS as e:
                 logger.warning("failed to default input_mode: %s", e)
 
@@ -372,10 +378,16 @@ class GuiBackend(QObject):
             cur = controller.config.input_mode
         except DEVICE_EXCEPTIONS:  # device dropped mid-read
             return
-        select = allowed.index(cur) if cur in allowed else -1  # -1: device runs a mode we don't list
         self._input_mode_values = list(allowed)
         self._input_modes = [INPUT_MODES[v] for v in allowed]
-        self._input_mode_index = select
+        if cur in allowed:
+            self._input_mode_index = allowed.index(cur)
+        else:
+            # Device runs a mode we don't list (e.g. set via CLI) — show it
+            # as an extra, informational entry. Selecting it is a no-op.
+            label = f"unknown (0x{cur:X})"
+            self._input_modes.append(label)
+            self._input_mode_index = len(self._input_mode_values)
         self.inputModeModelChanged.emit()
         # Model-building only: never write input_mode here — connect/poll are
         # read paths (ARCHITECTURE.md forbids implicit writes). Defaulting to

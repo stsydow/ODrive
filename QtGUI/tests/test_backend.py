@@ -6,6 +6,8 @@ from odrive.enums import (
     CONTROL_MODE_POSITION_CONTROL,
     CONTROL_MODE_TORQUE_CONTROL,
     CONTROL_MODE_VELOCITY_CONTROL,
+    INPUT_MODE_PASSTHROUGH,
+    INPUT_MODE_VEL_RAMP,
 )
 
 from backend import INPUT_MODES, MODES_BY_CONTROL, GuiBackend
@@ -98,3 +100,19 @@ def test_log_text_tracks_events(backend):
     backend.logEvent("TEST", "hello")
     assert "TEST" in backend.logText
     assert "hello" in backend.logText
+
+
+def test_mode_change_overrides_passthrough(backend):
+    axis = backend.odrive.axis0
+    axis.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
+    axis.controller.config.control_mode = CONTROL_MODE_POSITION_CONTROL  # device-side state
+    backend.setMode("Velocity Control")
+    assert axis.controller.config.input_mode == INPUT_MODE_VEL_RAMP
+    assert "input mode -> Velocity Ramp" in backend.logText
+
+
+def test_unknown_input_mode_shown_as_extra_entry(backend):
+    backend.odrive.axis0.controller.config.input_mode = 0x7F
+    backend._input_mode_model_for(CONTROL_MODE_VELOCITY_CONTROL)
+    assert backend.inputModes[-1] == "unknown (0x7F)"
+    assert backend.currentInputMode == len(MODES_BY_CONTROL[CONTROL_MODE_VELOCITY_CONTROL])
