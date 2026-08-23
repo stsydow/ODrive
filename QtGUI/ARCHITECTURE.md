@@ -133,6 +133,57 @@ so QML accesses it by name everywhere (menus, rows, dialogs); a second context p
 | **Auto-connect/reconnect, no manual button** | Startup auto-connect + loss auto-reconnect; the footer shows state. |
 | **Ctrl+C via `SIG_DFL`** | The Qt event loop is a blocking C++ call, so a Python `KeyboardInterrupt` isn't serviced during `exec()`. Restoring the default SIGINT action terminates reliably from any state. Safe because the GUI is monitor-only. |
 
+## Device I/O: how libfibre reads actually work
+
+Findings from `tools/odrive/pyfibre/fibre/libfibre.py` / `protocol.py`:
+
+- **Every attribute access is its own blocking RPC.** `odrv.axis0.encoder.vel_estimate`
+  resolves each hop via `RemoteAttribute.__get__` → C `libfibre_get_attribute`, and magic
+  getters call a `read()` remote function that blocks the calling thread until the endpoint
+  round-trip completes. Only the Python *wrapper* objects are memoized (`LibFibre._objects`),
+  never values.
+- **No bulk read exists.** The exported C API has no batch primitive (only `libfibre_call`,
+  `libfibre_get_attribute`, raw tx/rx); `fibre.read_all` drains bytes of a single transfer;
+  `RemoteObject._dump()` walks the tree doing N sequential RPCs. Reading all displayed values
+  at once would require firmware/protocol changes — deliberately not pursued. If poll traffic
+  ever matters, shrink the set of polled endpoints instead (a one-line change to `_reading`).
+- **Exception mapping** (`_get_exception`): status codes become `CancelledError`, `EOFError`
+  (closed), `ObjectLostError` (host unreachable), `TimeoutError`/`OSError` (transport layers
+  above), or a bare `Exception` for internal/protocol errors — the latter stay uncaught on
+  purpose (bug signal).
+- **`_on_lost` lags the failure.** It fires when libfibre releases the object
+  (`_release_py_obj` → `_destroy()`), after reads already fail. Once destroyed, further
+  attribute access raises **`AttributeError`** (class swapped to `EmptyInterface`), not
+  `ObjectLostError`. Hence the poll catches `(*DEVICE_EXCEPTIONS, AttributeError)`.
+
+## Firmware oscilloscope (control-loop debugging)
+
+The firmware has an on-chip oscilloscope (`Firmware/MotorControl/oscilloscope.{hpp,cpp}`)
+for recording signals at the **control-loop rate** — the mechanism to use when the GUI's
+100 ms poll is too slow (loop tuning, step responses). How it works:
+
+- One capture buffer: `float data_[4096]` (`OSCILLOSCOPE_SIZE` in oscilloscope.hpp; RAM-bound,
+  bump it if needed). At 8 kHz control rate that is ~0.5 s of signal.
+- `Oscilloscope::update()` runs once per `control_loop_cb` interrupt, next to the estimator
+  output-port resets, so sample rate == control-loop rate.
+- Simple edge trigger: one `trigger_src_` float watched against `trigger_threshold_`; below
+  threshold arms the capture, crossing above fills the buffer with samples of ONE variable.
+- **Compile-time channel selection:** both sources are plain pointers set in
+  `odrive_main.h:L227` (`nullptr` by default → records nothing out of the box). Capturing a
+  value means pointing `data_src_` at that float (e.g. a controller/encoder estimate),
+  optionally setting `trigger_src_`, and reflashing. There is no endpoint to select channels
+  at runtime.
+- Host interface: only `odrv.oscilloscope.size` and `get_val(index)` — one blocking RPC per
+  sample. `tools/odrive/utils.py` wraps this: `oscilloscope_dump(odrv, n, file)` writes CSV,
+  `show_oscilloscope(odrv)` plots via matplotlib. No timestamps are exported; index ×
+  control-loop period is the timebase.
+
+If loop debugging becomes a QtGUI feature: pick the variable in `odrive_main.h`, reflash,
+then add a "Capture & Export" slot that reads `get_val(0..size-1)` in a worker thread and
+writes CSV. Known ceilings (accepted until proven limiting): single channel, compile-time
+selection, fixed trigger, 4096-sample window. Multi-channel/runtime-selectable capture would
+be a firmware project, not a GUI feature.
+
 ## Exception Handling
 
 Device reads/writes catch only `DEVICE_EXCEPTIONS`. Never blanket-swallow `Exception`. `sys.path` bootstrap for
