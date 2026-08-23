@@ -116,3 +116,15 @@ def test_unknown_input_mode_shown_as_extra_entry(backend):
     backend._input_mode_model_for(CONTROL_MODE_VELOCITY_CONTROL)
     assert backend.inputModes[-1] == "unknown (0x7F)"
     assert backend.currentInputMode == len(MODES_BY_CONTROL[CONTROL_MODE_VELOCITY_CONTROL])
+
+
+def test_transport_error_triggers_reconnect(backend):
+    hits = []
+    backend.connectOdrive = lambda: hits.append(1)  # fixture default is a no-op
+
+    def boom(*a):
+        raise TimeoutError("bus hiccup")  # transient failure: _on_lost would NOT fire
+
+    backend.status_backend.update_readings = boom
+    backend.updateReadings()
+    assert hits and backend.odrive is None

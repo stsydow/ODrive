@@ -3,7 +3,7 @@ import logging
 import odrive.enums
 from PySide6.QtCore import Property, QObject, Signal
 
-from errors import DEVICE_EXCEPTIONS, format_current, read_error_report
+from errors import format_current, read_error_report
 
 logger = logging.getLogger(__name__)
 
@@ -108,16 +108,15 @@ class StatusBackend(QObject):
                 self.stateChanged.emit()
 
     def _update_voltages(self, odrv):
-        try:
-            vbus = odrv.vbus_voltage
-            new_v = f"{vbus:.1f} V"
-            new_p = f"{vbus * odrv.ibus:.1f} W"
-            if new_v != self._vbus_text or new_p != self._power_text:
-                self._vbus_text = new_v
-                self._power_text = new_p
-                self.powerChanged.emit()
-        except DEVICE_EXCEPTIONS:
-            pass
+        # Transport failures propagate to the caller (the poll's guarded
+        # fetch in GuiBackend.updateReadings) instead of being swallowed here.
+        vbus = odrv.vbus_voltage
+        new_v = f"{vbus:.1f} V"
+        new_p = f"{vbus * odrv.ibus:.1f} W"
+        if new_v != self._vbus_text or new_p != self._power_text:
+            self._vbus_text = new_v
+            self._power_text = new_p
+            self.powerChanged.emit()
 
     def _update_errors(self, odrv, log_event_func):
         report = read_error_report(odrv)

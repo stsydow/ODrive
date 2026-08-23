@@ -17,7 +17,6 @@ import threading
 import time
 from collections import deque
 
-import fibre
 import odrive
 import odrive.configuration
 import odrive.enums
@@ -205,7 +204,8 @@ class GuiBackend(QObject):
 
         self._sync_setpoint_from_device()
         self.status_backend.set_conn("\u25cf Online", "green", True)
-        self._input_mode_model_for(self._read_mode())
+        # Input-mode model is built by the first poll tick (<100 ms away) via
+        # _sync_mode -> _input_mode_model_for; nothing extra to do here.
         self.logEvent("CONNECT", "online (axis0 wired)")
         logger.info("Connected to ODrive")
 
@@ -228,10 +228,6 @@ class GuiBackend(QObject):
             return self.odrive.axis0
         except DEVICE_EXCEPTIONS:
             return None
-
-    def _read_mode(self):
-        axis = self._axis()
-        return None if axis is None else axis.controller.config.control_mode
 
     # -- control handlers ----------------------------------------------
 
@@ -284,8 +280,6 @@ class GuiBackend(QObject):
         if new_mode is None:
             return
         controller = axis.controller
-        if controller.config.control_mode == new_mode:
-            return
         try:
             controller.config.control_mode = new_mode
             self._active_mode_enum = new_mode
@@ -349,8 +343,8 @@ class GuiBackend(QObject):
         if axis is None:
             return
         controller = axis.controller
-        mode = self._read_mode()
         try:
+            mode = controller.config.control_mode
             if mode == CONTROL_MODE_VELOCITY_CONTROL and controller.input_vel is not None:
                 self._setpoints[CONTROL_MODE_VELOCITY_CONTROL] = float(controller.input_vel)
             elif mode == CONTROL_MODE_TORQUE_CONTROL and controller.input_torque is not None:
@@ -374,10 +368,9 @@ class GuiBackend(QObject):
             self.inputModeModelChanged.emit()
             return
         allowed = MODES_BY_CONTROL.get(control_mode, [INPUT_MODE_PASSTHROUGH])
-        try:
-            cur = controller.config.input_mode
-        except DEVICE_EXCEPTIONS:  # device dropped mid-read
-            return
+        # No local guard: callers wrap this in their own device-failure handling
+        # (_sync_mode runs inside the poll's try, setMode inside its slot handler).
+        cur = controller.config.input_mode
         self._input_mode_values = list(allowed)
         self._input_modes = [INPUT_MODES[v] for v in allowed]
         if cur in allowed:
@@ -414,9 +407,7 @@ class GuiBackend(QObject):
         axis = self._axis()
         if axis is None:
             return
-        actual = self._read_mode()
-        if actual is None:
-            return
+        actual = axis.controller.config.control_mode
         if actual == self._last_synced_mode:
             return
         self._last_synced_mode = actual
@@ -611,6 +602,12 @@ class GuiBackend(QObject):
     # -- readings poll -------------------------------------------------
 
     def updateReadings(self):
+        """Single guarded poll: every display read happens here.
+
+        Any transport failure (or the lost-object race) drops the link and
+        auto-reconnects, so nothing below this method needs its own handling
+        for device reads.
+        """
         if self.odrive is None:
             return
         try:
@@ -621,9 +618,13 @@ class GuiBackend(QObject):
             if self.status_backend._rendered_errors != old_rendered:
                 self.errorsChanged.emit()
             self._read_estimates()
-        except fibre.libfibre.ObjectLostError:
-            logger.warning("updateReadings: read failed but _on_lost did not fire",
-                           exc_info=True)
+        except (*DEVICE_EXCEPTIONS, AttributeError):
+            # AttributeError: once fibre destroys a lost object its class is
+            # swapped to EmptyInterface, so late accesses raise AttributeError
+            # rather than ObjectLostError (see LibFibre._release_py_obj).
+            # ponytail: any transport hiccup drops the link and reconnects;
+            # widen to an N-strike counter here if USB proves flaky.
+            logger.warning("updateReadings: read failed, reconnecting", exc_info=True)
             self.status_backend.set_conn("\u25cf Offline", "gray", False)
             self.odrive = None
             self.connectOdrive()

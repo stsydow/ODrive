@@ -54,11 +54,12 @@ QtGUI/
 └── ARCHITECTURE.md        # ← this file
 ```
 
-`GuiBackend` owns all UI state and the device logic. The device root (`self.odrive`) is the
-single source of truth; `axis`/`motor`/`encoder`/`controller` are derived read-only
-properties (guarded by `DEVICE_EXCEPTIONS`) so they can never go stale or drift out of sync.
-QML owns presentation only: it binds to `backend.*` properties (updated on the 100 ms
-poll) and invokes `backend.*()` slots for user actions.
+`GuiBackend` owns all UI state and the device logic. `self.odrive` is the only stored device
+ref; the device state is the source of truth and display values are re-read from it by the
+100 ms poll (all display reads happen inside `updateReadings`, see "Device I/O" below) or on
+explicit user actions.
+QML owns presentation only: it binds to `backend.*` properties (updated on the 100 ms poll)
+and invokes `backend.*()` slots for user actions.
 
 ## Connection Lifecycle
 
@@ -71,9 +72,10 @@ App start ─ QTimer.singleShot(500ms) ─▶ connectOdrive()
 
 Device lost (USB unplug / reboot)
   └─ PRIMARY:  odrv._on_lost fires (library discovery thread) ─▶ connectOdrive()
-       └─ if reads raise ObjectLostError in updateReadings but _on_lost never
-          fired (a library bug): caught centrally, logged with traceback, polling
-          stopped and reconnect attempted — so the miss is visible, not silent.
+       └─ if reads fail inside updateReadings without _on_lost having fired
+          (transient TimeoutError/OSError, or the lost-object race): caught
+          centrally, logged with traceback and reconnect attempted — visible,
+          not silent.
 ```
 
 All worker→UI crossings go through `QTimer.singleShot(0, ...)` (thread-safe post to the
@@ -117,10 +119,11 @@ so QML accesses it by name everywhere (menus, rows, dialogs); a second context p
 
 | Decision | Rationale |
 |----------|-----------|
-| **Single source of truth** | `self.odrive` is the only stored device ref; axis/motor/encoder/controller are direct-access properties (guarded by `DEVICE_EXCEPTIONS`) — removes a five-field state that could drift/stale across reconnects. |
+| **Single source of truth** | `self.odrive` is the only stored device ref — no cached copy of device values that could drift/stale across reconnects (a partial snapshot dict was tried and deliberately removed: half-fresh values are worse than a failed read). |
 | **QML context property, one `backend` object** | One `QObject` is the whole QML-facing API; no per-field signal plumbing. `setContextProperty` is the runtime bridge (qmllint relies on this, hence `.qmllint.ini` demoting the `unqualified`/`ContextProperties` warnings — a known false positive for injected backends). |
 | **`threading.Thread` + `QTimer.singleShot(0,...)`** | A plain daemon thread plus a posted timer beats `QThread`/`moveToThread` boilerplate for one blocking call, and is equally safe (Qt is thread-safe for `singleShot`). |
-| **`_on_lost` primary, `ObjectLostError` fallback** | `_on_lost` gives instant disconnect notification; a central `ObjectLostError` catch in `updateReadings` catches the (rare) case where it doesn't fire, stops polling and reconnects. |
+| **Central guarded poll, not per-read handlers** | All display reads run inside `updateReadings`' single try/except → one failure policy (log + auto-reconnect). User-action slots keep their own handlers because they must report write failures. |
+| **`_on_lost` primary, central read-failure fallback** | `_on_lost` gives disconnect notification, but it lags the actual failure (fires only when libfibre releases the object). A central catch of `(*DEVICE_EXCEPTIONS, AttributeError)` in `updateReadings` covers transient transport errors and the lost-object race, stops polling and reconnects. |
 | **Catch only `DEVICE_EXCEPTIONS`** | The expected, transient fibre/odrive failures (`ObjectLostError`, `EOFError`, `TimeoutError`, `OSError`, `CancelledError`). A bare generic libfibre `Exception` is a bug and is left uncaught so it surfaces with a stack trace. |
 | **`_on_lost.done()` guard on connect** | If the device dropped before the callback is registered, schedule a fresh reconnect rather than letting `add_done_callback` fire in the connect thread. |
 | **States execute only via button** | Selecting a dropdown item just sets the selection; only Start/Execute actually commands the device — browsing can't accidentally start a calibration. |
@@ -146,7 +149,7 @@ Findings from `tools/odrive/pyfibre/fibre/libfibre.py` / `protocol.py`:
   `libfibre_get_attribute`, raw tx/rx); `fibre.read_all` drains bytes of a single transfer;
   `RemoteObject._dump()` walks the tree doing N sequential RPCs. Reading all displayed values
   at once would require firmware/protocol changes — deliberately not pursued. If poll traffic
-  ever matters, shrink the set of polled endpoints instead (a one-line change to `_reading`).
+  ever matters, shrink the set of polled endpoints instead.
 - **Exception mapping** (`_get_exception`): status codes become `CancelledError`, `EOFError`
   (closed), `ObjectLostError` (host unreachable), `TimeoutError`/`OSError` (transport layers
   above), or a bare `Exception` for internal/protocol errors — the latter stay uncaught on
@@ -155,6 +158,9 @@ Findings from `tools/odrive/pyfibre/fibre/libfibre.py` / `protocol.py`:
   (`_release_py_obj` → `_destroy()`), after reads already fail. Once destroyed, further
   attribute access raises **`AttributeError`** (class swapped to `EmptyInterface`), not
   `ObjectLostError`. Hence the poll catches `(*DEVICE_EXCEPTIONS, AttributeError)`.
+- **Consequence:** one guarded fetch point (`GuiBackend.updateReadings`) covers every
+display read; any transport hiccup drops
+  the link and auto-reconnects (upgrade path: an N-strike counter if USB proves flaky).
 
 ## Firmware oscilloscope (control-loop debugging)
 
