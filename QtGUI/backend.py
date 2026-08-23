@@ -13,6 +13,7 @@ via ``QTimer.singleShot(0, ...)``).
 """
 
 import logging
+import math
 import threading
 import time
 from collections import deque
@@ -37,6 +38,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from errors import DEVICE_EXCEPTIONS
 from eventlog import LogEntry, format_log
+from monitoring import PlotWindow, SampleBuffer
 from status_backend import STATE_MAP, StatusBackend
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,73 @@ _SETPOINT_TARGETS = {
     CONTROL_MODE_VELOCITY_CONTROL: ("input_vel", "Velocity"),
     CONTROL_MODE_TORQUE_CONTROL: ("input_torque", "Torque"),
     CONTROL_MODE_POSITION_CONTROL: ("input_pos", "Position"),
+}
+
+
+# Loop-side setpoint endpoint per control mode: what the control loop actually
+# runs on after input-mode filtering (VEL_RAMP etc.) — differs from input_*,
+# which jumps immediately when applied.
+_SETPOINT_LOOP_TARGETS = {
+    CONTROL_MODE_VELOCITY_CONTROL: "vel_setpoint",
+    CONTROL_MODE_TORQUE_CONTROL: "torque_setpoint",
+    CONTROL_MODE_POSITION_CONTROL: "pos_setpoint",
+}
+
+
+def _f(obj, attr):
+    """getattr as float; NaN when the endpoint doesn't exist on this fw."""
+    v = getattr(obj, attr, None)
+    return float(v) if v is not None else math.nan
+
+
+# Plot channels: key -> reader(axis) -> float. Keys must match the entries in
+# monitoring.CHANNELS (labels/units/CSV order live there); observing another
+# property later means adding one entry here and one in CHANNELS - nothing else.
+def _pos_reader(axis):
+    enc = axis.encoder
+    v = getattr(enc, "pos_circular", None)
+    if v is None:
+        v = getattr(enc, "pos_estimate", None)
+    return float(v) if v is not None else math.nan
+
+
+def _mode_endpoint(axis, targets):
+    target = targets.get(
+        getattr(getattr(axis.controller, "config", None), "control_mode", None), None)
+    return _f(axis.controller, target) if target else math.nan
+
+
+def _iq_reader(axis):
+    return _f(getattr(axis.motor, "current_control", None), "Iq_measured")
+
+
+def _torque_reader(axis):
+    # Iq is derived by fw from its two measured phase currents; there is no
+    # torque endpoint on 0.5.x -> computed as Iq * torque_constant.
+    iq = _iq_reader(axis)
+    tc = getattr(getattr(axis.motor, "config", None), "torque_constant", None)
+    return iq * float(tc) if not math.isnan(iq) and tc is not None else math.nan
+
+
+def _setpoint_reader(axis):
+    # loop setpoint: post-filtering value the controller chases
+    return _mode_endpoint(axis, _SETPOINT_LOOP_TARGETS)
+
+
+def _input_reader(axis):
+    # commanded input: what Apply wrote (steps instantly under VEL_RAMP)
+    return _mode_endpoint(axis, {m: t[0] for m, t in _SETPOINT_TARGETS.items()})
+
+
+_PLOT_READERS = {
+    "vel": lambda a: _f(a.encoder, "vel_estimate"),
+    "pos": _pos_reader,
+    "iq": _iq_reader,
+    "i_a": lambda a: _f(a.motor, "current_meas_phA"),
+    "i_b": lambda a: _f(a.motor, "current_meas_phB"),
+    "torque": _torque_reader,
+    "setpoint": _setpoint_reader,
+    "input": _input_reader,
 }
 
 # Input modes exposed in the selector. Value -> display label.
@@ -115,6 +184,8 @@ class GuiBackend(QObject):
         self._pos_est_text = "est: -- rev"
 
         self.event_log = deque(maxlen=1000)
+        self.samples = SampleBuffer()
+        self._plot_window = None
 
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.updateReadings)
@@ -616,6 +687,7 @@ class GuiBackend(QObject):
             if self.status_backend.update_readings(self.odrive, self._axis(), self.logEvent):
                 self.errorsChanged.emit()
             self._read_estimates()
+            self._sample_plot()
         except (*DEVICE_EXCEPTIONS, AttributeError):
             # AttributeError: once fibre destroys a lost object its class is
             # swapped to EmptyInterface, so late accesses raise AttributeError
@@ -626,6 +698,35 @@ class GuiBackend(QObject):
             self.status_backend.set_conn("\u25cf Offline", "gray", False)
             self.odrive = None
             self.connectOdrive()
+
+    # -- live plot (Plan §3.1) -----------------------------------------
+
+    @Slot()
+    def showPlot(self):
+        """Open (or raise) the native pyqtgraph plot window."""
+        if self._plot_window is None:
+            try:
+                self._plot_window = PlotWindow(self.samples)
+            except ImportError:
+                self.logEvent("ERROR", "pyqtgraph not installed - live plot unavailable")
+                logger.warning("live plot requested but pyqtgraph is missing")
+                return
+        self._plot_window.show()
+        self._plot_window.raise_()
+        self._plot_window.activateWindow()
+
+    def _sample_plot(self):
+        """Append one plot sample per poll; missing endpoints become NaN.
+
+        Runs every poll regardless of the window being open, so opening the
+        plot later already shows history. getattr-gated like everything else
+        (AttributeError here would falsely trigger a reconnect).
+        """
+        axis = self._axis()
+        if axis is None:
+            return
+        self.samples.append(time.time(),
+                            {key: read(axis) for key, read in _PLOT_READERS.items()})
 
     def _read_estimates(self):
         axis = self._axis()

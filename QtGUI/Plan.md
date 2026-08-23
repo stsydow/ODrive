@@ -45,6 +45,7 @@ QtGUI/
 ├── controls.py          # Control settings: gains, limits, input mode, feed-fwd   ✅
 ├── errors.py            # Current error decode + dialog (Phase 2)                ✅
 ├── eventlog.py          # In-memory UI/device event log + viewer (Debug menu)   ✅
+├── monitoring.py        # Live plot: sample buffer + pyqtgraph window (Phase 3)   ✅
 ├── calibration.py       # Calibration wizard + inertia/friction tests (Phase 4)   ⬜ planned
 ├── ruff.toml            # Lint config                                              ✅
 ├── check.sh             # Lint/type-check runner                                   ✅
@@ -146,7 +147,7 @@ class ErrorReport:
 - `controls.py` also provides the read-only Config Browser dialog (`QDialog` + `QTreeWidget`). ⬜ not yet implemented
 - Device menu: the standalone "Dump Errors…"/"Clear Errors" become a single "Errors…" action (plus a clickable `Err:` footer field) that opens the error dialog; "Config Browser…" still to be added. ✅ / ⬜
 
-### Phase 2.5: Migrate UI to QML (DONE ✅ / 2.5.5 acceptance ⬜)
+### Phase 2.5: Migrate UI to QML (DONE ✅)
 
 **Goal:** Swap the QWidget front-end for a declarative **Qt Quick (QML)** UI while
 keeping every feature and design principle intact. The migration is a front-end
@@ -251,7 +252,7 @@ wanted). Event Log stays non-modal + live via the `logUpdated` signal. Widget
 `ErrorDialog`/`LogDialog` classes are deleted from `errors.py`/`eventlog.py`, which
 now hold only pure logic.
 
-#### 2.5.5 Acceptance ⬜ (tests done, device pass pending)
+#### 2.5.5 Acceptance ✅
 
 Automated: `check.sh` runs ruff, mypy, py_compile, **qmllint** (ships with
 PySide6), and a headless **pytest** suite (`qtgui/tests/`, `QT_QPA_PLATFORM=offscreen`,
@@ -259,22 +260,38 @@ mock ODrive) covering backend logic (mode/setpoint/mode-switch, config API,
 errors/device-info/event-log text) and QML loading + linkage (mode/input-mode
 combo follow the backend).
 
-Remaining manual pass on a real ODrive: connect, run/stop, mode switch, setpoint
-apply (Enter + button), settings edit with device echo, errors view + clear,
-event log (offline-capable), config export/import, reboot with auto-reconnect,
-unplug → error + reconnect.
+Manual pass on a real ODrive: done (connect, run/stop, mode switch, setpoint
+apply, settings edit with device echo, errors view + clear, event log,
+config export/import).
 
-### Phase 3: Monitoring & Plotting (⬜)
+### Phase 3: Monitoring & Plotting (3.1 DONE ✅)
 
 **Goal:** Live visual feedback for tuning, plus data logging.
 
-#### 3.1 Live Plot
+#### 3.1 Live Plot ✅
 
-- `pyqtgraph` line chart.
-- Channels: velocity, position, current, VBus, setpoint.
-- Selectable time window (5s / 30s / 60s).
-- Pause/resume.
-- **Performance:** Plot updates at 100 ms (same as polling rate). Use `pyqtgraph`'s append mode to avoid full redraw.
+Implemented in `monitoring.py` (+ sampling in `backend.py`, Device > Live Plot…):
+- Native top-level **pyqtgraph** window (`PlotWidget`) over the same `QApplication`
+  (pyqtgraph is QWidget-based; no QML embedding glue).
+- Channels (label/unit registry in `monitoring.CHANNELS`, device readers in
+  `backend._PLOT_READERS` — one entry each to observe another property later):
+  velocity (`vel_estimate`), position (`pos_circular` if exposed, else
+  `pos_estimate`), current Iq (fw-derived from its two measured phase currents),
+  raw phase currents phA/phB, torque (= Iq × `torque_constant`; no fw endpoint
+  on 0.5.x), setpoint (loop-side `*_setpoint`, post input-mode filtering) and
+  input (`input_*`, what Apply wrote). Missing endpoints → NaN → curve gap
+  (feature-gated).
+- Later channel candidates (from the operator's odrivetool liveplot history;
+  each is one `CHANNELS` entry + one `_PLOT_READERS` entry):
+  mechanical/electrical power (`controller.mechanical_power` /
+  `electrical_power`), bus current (`motor.I_bus`), velocity integrator torque
+  (`controller.vel_integrator_torque`).
+- Sampling runs every poll (100 ms) in `updateReadings` regardless of the window
+  being open — history exists when the plot is opened; nothing sampled while
+  disconnected. Fixed-retention ring buffer (`SampleBuffer`, 60 s @ 10 Hz).
+- Window selector 5/30/60 s; Pause freezes redraw only — sampling continues,
+  resume shows an unbroken trace. Full redraw of ≤600 pts/curve at 10 Hz
+  (`connect="finite"`) instead of incremental append.
 
 #### 3.2 Data Logging
 
@@ -285,7 +302,8 @@ unplug → error + reconnect.
 
 #### 3.3 Dependencies
 
-Add `pyqtgraph` to `requirements.txt` (needed here, not Phase 4).
+✅ `pyqtgraph` in `requirements.txt` (installed via `uv pip install pyqtgraph`).
+CSV export reuses `SampleBuffer.csv()` (header = channel labels).
 
 ### Phase 4: Torque Drive + Calibration + Dynamics (NEXT ⬜)
 

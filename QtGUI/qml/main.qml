@@ -18,6 +18,8 @@ ApplicationWindow {
             MenuSeparator {}
             MenuItem { text: "Re&boot"; onTriggered: backend.reboot() }
             MenuSeparator {}
+            MenuItem { text: "Live Plot…"; onTriggered: backend.showPlot() }
+            MenuSeparator {}
             MenuItem { text: "Errors"; onTriggered: errorDialog.show() }
             MenuSeparator {}
             MenuItem { text: "Device Info"; onTriggered: deviceInfoDialog.show() }
