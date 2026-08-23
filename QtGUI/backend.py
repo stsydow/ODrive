@@ -54,6 +54,13 @@ _MODE_ORDER = (CONTROL_MODE_VELOCITY_CONTROL,
                CONTROL_MODE_TORQUE_CONTROL)
 MODE_VALUES = {name: value for value, name in MODE_NAMES.items()}
 
+# Setpoint endpoint + display label per control mode (order irrelevant).
+_SETPOINT_TARGETS = {
+    CONTROL_MODE_VELOCITY_CONTROL: ("input_vel", "Velocity"),
+    CONTROL_MODE_TORQUE_CONTROL: ("input_torque", "Torque"),
+    CONTROL_MODE_POSITION_CONTROL: ("input_pos", "Position"),
+}
+
 # Input modes exposed in the selector. Value -> display label.
 INPUT_MODES = {
     INPUT_MODE_PASSTHROUGH: "Passthrough",
@@ -322,18 +329,11 @@ class GuiBackend(QObject):
         axis = self._axis()
         if axis is None:
             return
-        controller = axis.controller
+        attr, label = _SETPOINT_TARGETS[self._active_mode_enum]
         value = self._setpoints[self._active_mode_enum]
         try:
-            if self._active_mode_enum == CONTROL_MODE_VELOCITY_CONTROL:
-                controller.input_vel = value
-                self.logEvent("SETPOINT", f"Velocity setpoint -> {value}")
-            elif self._active_mode_enum == CONTROL_MODE_TORQUE_CONTROL:
-                controller.input_torque = value
-                self.logEvent("SETPOINT", f"Torque setpoint -> {value}")
-            elif self._active_mode_enum == CONTROL_MODE_POSITION_CONTROL:
-                controller.input_pos = value
-                self.logEvent("SETPOINT", f"Position setpoint -> {value}")
+            setattr(axis.controller, attr, value)
+            self.logEvent("SETPOINT", f"{label} setpoint -> {value}")
         except DEVICE_EXCEPTIONS as e:
             self.logEvent("SETPOINT", f"failed to apply setpoint: {e}")
 
@@ -562,8 +562,8 @@ class GuiBackend(QObject):
     # Live content for the QML error / event-log dialogs.
     @Property(str, notify=errorsChanged)
     def errorsText(self):
-        return self.status_backend._rendered_errors if self.status_backend._rendered_errors \
-            else "(no current-error snapshot — device not connected)"
+        return self.status_backend.rendered_errors or \
+            "(no current-error snapshot — device not connected)"
 
     @Property(str, notify=logUpdated)
     def logText(self):
@@ -613,9 +613,7 @@ class GuiBackend(QObject):
         try:
             self._sync_mode()
             self._sync_closed_loop()
-            old_rendered = self.status_backend._rendered_errors
-            self.status_backend.update_readings(self.odrive, self._axis(), self.logEvent)
-            if self.status_backend._rendered_errors != old_rendered:
+            if self.status_backend.update_readings(self.odrive, self._axis(), self.logEvent):
                 self.errorsChanged.emit()
             self._read_estimates()
         except (*DEVICE_EXCEPTIONS, AttributeError):

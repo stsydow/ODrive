@@ -67,3 +67,9 @@ GUI/build
 docs/reStructuredText/_build/
 tools/odrive-cansimple.ini
 .aider*
+
+# IDE / editor junk
+*.iml
+*.ipr
+*.iws
+.zed/

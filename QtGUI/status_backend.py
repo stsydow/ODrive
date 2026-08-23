@@ -57,7 +57,7 @@ class StatusBackend(QObject):
         self._power_text = "-- W"
         self._connected = False
         self._last_error_key = None
-        self._rendered_errors = None
+        self.rendered_errors = None  # full rendered error text for the dialog
 
     @Property(str, notify=connChanged)
     def connText(self): return self._conn_text
@@ -91,13 +91,14 @@ class StatusBackend(QObject):
         if changed:
             self.connChanged.emit()
 
-    def update_readings(self, odrv, axis, log_event_func):
+    def update_readings(self, odrv, axis, log_event_func) -> bool:
+        """Refresh footer state; returns True if the rendered error text changed."""
         if odrv is None:
-            return
+            return False
 
         self._update_state(axis)
         self._update_voltages(odrv)
-        self._update_errors(odrv, log_event_func)
+        return self._update_errors(odrv, log_event_func)
 
     def _update_state(self, axis):
         st = axis.current_state if axis is not None else None
@@ -118,7 +119,7 @@ class StatusBackend(QObject):
             self._power_text = new_p
             self.powerChanged.emit()
 
-    def _update_errors(self, odrv, log_event_func):
+    def _update_errors(self, odrv, log_event_func) -> bool:
         report = read_error_report(odrv)
         key = tuple(sorted((s.name, tuple(s.errors)) for s in report.sources))
         if key and key != self._last_error_key:
@@ -146,6 +147,7 @@ class StatusBackend(QObject):
             self.errorsChanged.emit()
 
         rendered = format_current(report)
-        if rendered != self._rendered_errors:
-            self._rendered_errors = rendered
-            self.errorsChanged.emit()
+        if rendered != self.rendered_errors:
+            self.rendered_errors = rendered
+            return True
+        return False

@@ -24,7 +24,6 @@ def test_initial_state_offline():
 def test_static_models(backend):
     assert backend.modeNames == ["Velocity Control", "Position Control", "Torque Control"]
     assert "Full Calibration Sequence" in backend.stateNames
-    assert backend.stateNames == list(backend.stateNames)  # stable order
 
 
 def test_run_and_stop_command_device(backend):
