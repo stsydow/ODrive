@@ -64,14 +64,6 @@ _SETPOINT_TARGETS = {
 }
 
 
-# Loop-side setpoint endpoint per control mode: what the control loop actually
-# runs on after input-mode filtering (VEL_RAMP etc.) — differs from input_*,
-# which jumps immediately when applied.
-_SETPOINT_LOOP_TARGETS = {
-    CONTROL_MODE_VELOCITY_CONTROL: "vel_setpoint",
-    CONTROL_MODE_TORQUE_CONTROL: "torque_setpoint",
-    CONTROL_MODE_POSITION_CONTROL: "pos_setpoint",
-}
 
 
 def _f(obj, attr):
@@ -80,10 +72,12 @@ def _f(obj, attr):
     return float(v) if v is not None else math.nan
 
 
-# Plot channels: key -> reader(axis) -> float. Keys must match the entries in
-# monitoring.CHANNELS (labels/units/CSV order live there); observing another
-# property later means adding one entry here and one in CHANNELS - nothing else.
-def _pos_reader(axis):
+# Plot channels: key -> reader(axis, odrive) -> float. Keys must match the
+# entries in monitoring.CHANNELS (labels/rows/mode gating live there); adding
+# a channel means one entry here and one in CHANNELS.
+
+
+def _pos_reader(axis, _odrv):
     enc = axis.encoder
     v = getattr(enc, "pos_circular", None)
     if v is None:
@@ -91,43 +85,38 @@ def _pos_reader(axis):
     return float(v) if v is not None else math.nan
 
 
-def _mode_endpoint(axis, targets):
-    target = targets.get(
-        getattr(getattr(axis.controller, "config", None), "control_mode", None), None)
-    return _f(axis.controller, target) if target else math.nan
 
 
-def _iq_reader(axis):
+def _iq_reader(axis, _odrv):
     return _f(getattr(axis.motor, "current_control", None), "Iq_measured")
 
 
-def _torque_reader(axis):
+def _torque_reader(axis, _odrv):
     # Iq is derived by fw from its two measured phase currents; there is no
     # torque endpoint on 0.5.x -> computed as Iq * torque_constant.
-    iq = _iq_reader(axis)
+    iq = _iq_reader(axis, None)
     tc = getattr(getattr(axis.motor, "config", None), "torque_constant", None)
     return iq * float(tc) if not math.isnan(iq) and tc is not None else math.nan
 
 
-def _setpoint_reader(axis):
-    # loop setpoint: post-filtering value the controller chases
-    return _mode_endpoint(axis, _SETPOINT_LOOP_TARGETS)
-
-
-def _input_reader(axis):
-    # commanded input: what Apply wrote (steps instantly under VEL_RAMP)
-    return _mode_endpoint(axis, {m: t[0] for m, t in _SETPOINT_TARGETS.items()})
-
-
 _PLOT_READERS = {
-    "vel": lambda a: _f(a.encoder, "vel_estimate"),
+    "vel": lambda a, d: _f(a.encoder, "vel_estimate"),
     "pos": _pos_reader,
+    # loop setpoints: post-filtering values the controller chases
+    "pos_sp": lambda a, d: _f(a.controller, "pos_setpoint"),
+    "vel_sp": lambda a, d: _f(a.controller, "vel_setpoint"),
+    "tq_sp": lambda a, d: _f(a.controller, "torque_setpoint"),
+    # commanded inputs: what Apply wrote (steps instantly under ramps)
+    "pos_in": lambda a, d: _f(a.controller, "input_pos"),
+    "vel_in": lambda a, d: _f(a.controller, "input_vel"),
+    "tq_in": lambda a, d: _f(a.controller, "input_torque"),
     "iq": _iq_reader,
-    "i_a": lambda a: _f(a.motor, "current_meas_phA"),
-    "i_b": lambda a: _f(a.motor, "current_meas_phB"),
+    "i_a": lambda a, d: _f(a.motor, "current_meas_phA"),
+    "i_b": lambda a, d: _f(a.motor, "current_meas_phB"),
     "torque": _torque_reader,
-    "setpoint": _setpoint_reader,
-    "input": _input_reader,
+    "p_mech": lambda a, d: _f(a.controller, "mechanical_power"),
+    "p_elec": lambda a, d: _f(a.controller, "electrical_power"),
+    "vbus": lambda a, d: _f(d, "vbus_voltage"),
 }
 
 # Input modes exposed in the selector. Value -> display label.
@@ -706,7 +695,7 @@ class GuiBackend(QObject):
         """Open (or raise) the native pyqtgraph plot window."""
         if self._plot_window is None:
             try:
-                self._plot_window = PlotWindow(self.samples)
+                self._plot_window = PlotWindow(self)
             except ImportError:
                 self.logEvent("ERROR", "pyqtgraph not installed - live plot unavailable")
                 logger.warning("live plot requested but pyqtgraph is missing")
@@ -725,8 +714,9 @@ class GuiBackend(QObject):
         axis = self._axis()
         if axis is None:
             return
-        self.samples.append(time.time(),
-                            {key: read(axis) for key, read in _PLOT_READERS.items()})
+        self.samples.append(
+            time.time(),
+            {key: read(axis, self.odrive) for key, read in _PLOT_READERS.items()})
 
     def _read_estimates(self):
         axis = self._axis()
@@ -743,6 +733,10 @@ class GuiBackend(QObject):
             self._vel_est_text = new_vel
             self._pos_est_text = new_pos
             self.estimatesChanged.emit()
+
+    def plotMode(self):
+        """Raw control-mode enum value the live plot's mode gating matches on."""
+        return self._active_mode_enum
 
     def _position_circular_range(self):
         axis = self._axis()

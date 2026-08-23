@@ -26,7 +26,7 @@ def test_missing_channels_are_nan():
     buf = SampleBuffer()
     buf.append(time.time(), {"vel": 1.0})  # iq/torque/setpoint not provided
     _, series = buf.window(30.0)
-    for key, _, _ in CHANNELS:
+    for key, *_ in CHANNELS:
         assert key in series
     assert series["vel"] == [1.0]
     assert math.isnan(series["torque"][0])
@@ -44,17 +44,22 @@ def test_csv_export_header_and_rows():
     buf = SampleBuffer()
     buf.append(123.456, {"vel": 1.5})
     lines = list(buf.csv())
-    assert lines[0] == "time," + ",".join(label for _, label, _ in CHANNELS)
-    assert lines[1].startswith("123.456,1.5,")
+    assert lines[0] == "time," + ",".join(label for _, label, *_ in CHANNELS)
+    assert lines[1].startswith("123.456,")
+    assert ",1.5," in lines[1]  # vel value present in its column
 
 
 def test_readers_against_mock_device():
-    axis = MockDevice().axis0
-    vals = {key: read(axis) for key, read in _PLOT_READERS.items()}
+    dev = MockDevice()
+    axis = dev.axis0
+    vals = {key: read(axis, dev) for key, read in _PLOT_READERS.items()}
     assert vals["vel"] == 1.5          # MockEncoder.vel_estimate
     assert vals["pos"] == 2.5          # no pos_circular on mock -> pos_estimate
-    # mock fw exposes no current_control / torque_constant / loop setpoint
-    assert math.isnan(vals["iq"])
-    assert math.isnan(vals["torque"])
-    assert math.isnan(vals["setpoint"])
-    assert vals["input"] == 1.0        # controller.input_vel (VELOCITY mode)
+    assert vals["vel_in"] == 1.0       # controller.input_vel
+    assert vals["pos_in"] == 0.0       # MockController.input_pos default
+    assert vals["tq_in"] == 0.0        # MockController.input_torque default
+    assert vals["vbus"] == 24.0        # MockDevice.vbus_voltage
+    # mock fw exposes none of these endpoints -> NaN (feature-gated curves)
+    for key in ("iq", "i_a", "i_b", "torque", "p_mech", "p_elec",
+                "pos_sp", "vel_sp", "tq_sp"):
+        assert math.isnan(vals[key]), key
