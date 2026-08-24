@@ -13,6 +13,10 @@ import QtQuick.Layouts
 RowLayout {
     id: control
 
+    // Unique per instance ("motor.current_lim"); lets tests reach this row
+    // without scanning the whole window tree.
+    objectName: base + "." + attr
+
     property string attr: ""
     property string base: ""
     property string label: ""
@@ -37,6 +41,8 @@ RowLayout {
         to: control.max
         decimals: control.decimals
         stepSize: control.step
+        // Typeable, like the setpoint boxes.
+        editable: true
         // Write-on-change: valueModified fires only on interactive edits, so
         // the programmatic set in sync() does not echo back into setConfig.
         onValueModified: backend.setConfig(control.base, control.attr, spin.value)

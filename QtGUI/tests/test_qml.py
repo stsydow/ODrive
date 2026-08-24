@@ -82,6 +82,23 @@ def test_enter_in_setpoint_applies_to_device(qml, backend):
     assert backend.odrive.axis0.controller.input_vel == 2.5
 
 
+def test_settings_spinboxes_editable(qml):
+    """Keyboard accessibility: settings spinboxes accept typed input, not just
+    mouse clicks on the +/- buttons (the setpoint boxes already were). One
+    row per settings tab, found by objectName — scanning the whole window
+    tree is unreliable offscreen."""
+    root = qml.rootObjects()[0]
+    for name in ["motor.current_lim",          # Electrical Limits
+                 "controller.vel_limit",       # Mechanical Limits
+                 "controller.vel_gain"]:       # Control Parameters
+        row = _find_qml(root, name)
+        assert row is not None, f"{name} row not found"
+        spins = [c for c in row.findChildren(QObject, None)
+                 if c.metaObject().className().startswith("DoubleSpinBox")]
+        assert len(spins) == 1 and spins[0].property("editable"), \
+            f"{name}: spinbox missing or not editable"
+
+
 def test_mode_combo_follows_backend(qml):
     root = qml.rootObjects()[0]
     mode = _find_qml(root, "modeCombo")
