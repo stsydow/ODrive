@@ -9,6 +9,7 @@ from odrive.enums import (
     INPUT_MODE_PASSTHROUGH,
     INPUT_MODE_VEL_RAMP,
 )
+from PySide6.QtCore import QEventLoop, QTimer
 
 from backend import INPUT_MODES, MODES_BY_CONTROL, GuiBackend
 
@@ -22,7 +23,7 @@ def test_initial_state_offline():
 
 
 def test_static_models(backend):
-    assert backend.modeNames == ["Velocity Control", "Position Control", "Torque Control"]
+    assert backend.modeNames == ["Velocity", "Position", "Torque"]
     assert "Full Calibration Sequence" in backend.stateNames
 
 
@@ -43,7 +44,7 @@ def test_set_active_setpoint_then_apply_writes_device(backend):
 def test_set_mode_seeds_new_modes_setpoint(backend):
     # Start in velocity, set a velocity setpoint, then switch to position.
     backend.setActiveSetpoint(3.25)  # stored under the active (velocity) mode
-    backend.setMode("Position Control")
+    backend.setMode("Position")
     assert backend.odrive.axis0.controller.config.control_mode == CONTROL_MODE_POSITION_CONTROL
     # The previous mode's input is not written (regression guard).
     assert backend.odrive.axis0.controller.input_vel == 1.0
@@ -58,7 +59,7 @@ def test_set_mode_seeds_new_modes_setpoint(backend):
 def test_set_mode_not_writing_to_previous_mode(backend):
     # Regression: on mode switch, the OLD mode's input must not be touched.
     backend.setActiveSetpoint(5.0)
-    backend.setMode("Torque Control")
+    backend.setMode("Torque")
     assert backend.odrive.axis0.controller.input_vel == 1.0  # old input untouched
     assert backend.odrive.axis0.controller.config.control_mode == CONTROL_MODE_TORQUE_CONTROL
 
@@ -69,7 +70,7 @@ def _expected_inputs(mode):
 
 def test_input_mode_model_follows_control_mode(backend):
     assert backend.inputModes == _expected_inputs(CONTROL_MODE_VELOCITY_CONTROL)
-    backend.setMode("Position Control")
+    backend.setMode("Position")
     assert backend.inputModes == _expected_inputs(CONTROL_MODE_POSITION_CONTROL)
 
 
@@ -105,7 +106,7 @@ def test_mode_change_overrides_passthrough(backend):
     axis = backend.odrive.axis0
     axis.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
     axis.controller.config.control_mode = CONTROL_MODE_POSITION_CONTROL  # device-side state
-    backend.setMode("Velocity Control")
+    backend.setMode("Velocity")
     assert axis.controller.config.input_mode == INPUT_MODE_VEL_RAMP
     assert "input mode -> Velocity Ramp" in backend.logText
 
@@ -127,3 +128,35 @@ def test_transport_error_triggers_reconnect(backend):
     backend.status_backend.update_readings = boom
     backend.updateReadings()
     assert hits and backend.odrive is None
+
+
+def test_device_loss_drops_link_and_schedules_one_reconnect(backend):
+    """_on_device_lost: odrive dropped immediately, one reconnect queued."""
+    hits = []
+    backend.connectOdrive = lambda: hits.append(1)
+    # The fixture attaches the device directly (bypassing _on_connected), so
+    # register the loss callback here exactly as connect does.
+    fut = backend.odrive._on_lost
+    fut.add_done_callback(backend._on_device_lost)
+    for cb in list(fut._cbs):  # fire the loss callback like the fibre thread would
+        cb(fut)
+    assert backend.odrive is None
+    loop = QEventLoop()
+    QTimer.singleShot(0, loop.quit)
+    loop.exec()  # flush the singleShot(0) reconnect
+    assert len(hits) == 1  # a second path would double-connect
+
+
+def test_type_error_tick_drops_link_once(backend):
+    """The libfibre EmptyInterface race raises TypeError mid-teardown; both
+    poll ticks must treat it as transport failure."""
+    hits = []
+    backend.connectOdrive = lambda: hits.append(1)
+
+    def boom():
+        raise TypeError("Expected RemoteObject but got 'EmptyInterface'")
+
+    backend._sample_plot = boom
+    backend.plotTick()
+    assert backend.odrive is None and len(hits) == 1
+    backend.plotTick()  # offline now: must early-return silently

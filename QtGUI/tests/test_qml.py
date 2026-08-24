@@ -103,7 +103,7 @@ def test_mode_combo_follows_backend(qml):
     root = qml.rootObjects()[0]
     mode = _find_qml(root, "modeCombo")
     _process_events(qml)
-    assert mode.property("currentText") == "Velocity Control"
+    assert mode.property("currentText") == "Velocity"
 
 
 def test_input_mode_combo_links_to_control_mode(qml, backend):
@@ -113,7 +113,7 @@ def test_input_mode_combo_links_to_control_mode(qml, backend):
     assert input_combo.property("currentText") == "Velocity Ramp"
     # Explicit control-mode switch: device still runs VEL_RAMP (2), which
     # position mode doesn't list — setMode() steers it to the mode default.
-    backend.setMode("Position Control")
+    backend.setMode("Position")
     _process_events(qml)
     assert input_combo.property("currentText") == "Trapezoidal Trajectory"
     assert input_combo.property("count") == 3

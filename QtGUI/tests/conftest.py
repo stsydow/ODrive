@@ -111,13 +111,17 @@ class MockDevice:
 
 
 class _Future:
-    """Stand-in for the odrive library's _on_lost future."""
+    """Stand-in for the odrive library's _on_lost future (callbacks storable
+    so tests can simulate device loss)."""
+
+    def __init__(self):
+        self._cbs = []
 
     def done(self):
         return False
 
     def add_done_callback(self, cb):
-        pass
+        self._cbs.append(cb)
 
 
 # ── Fixtures ────────────────────────────────────────────────────────────

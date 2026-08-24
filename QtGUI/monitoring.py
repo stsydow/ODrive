@@ -1,8 +1,8 @@
 """Live plot (Plan §3.1): fixed-retention sample buffer + pyqtgraph window.
 
-Sampling happens in GuiBackend.updateReadings (100 ms poll rate) into a
-SampleBuffer; the plot window only redraws slices of that buffer on its own
-QTimer, so closing/opening the window never affects capture.
+Sampling runs on its own 10 ms timer in GuiBackend (100 Hz, benchmark-justified
+— Plan §3.4 Step 0 measured ~940 Hz x 4 ch ceiling); the status footer and
+control UI keep their 100 ms poll.
 """
 
 from __future__ import annotations
@@ -44,14 +44,14 @@ CHANNELS = [
     ("i_a", "Current phA", False, "current", None),
     ("i_b", "Current phB", False, "current", None),
     ("p_mech", "Mech. power", False, "power", None),
-    ("p_elec", "Elec. power", False, "power", None),
-    ("vbus", "Bus voltage", True, "voltage", None),
+    ("p_elec", "Elec. power", True, "power", None),
+    ("vbus", "Bus voltage", False, "voltage", None),
 ]
 
-SAMPLE_INTERVAL_S = 0.1   # == device poll rate
+SAMPLE_INTERVAL_S = 0.01  # plot sampling rate (benchmark §3.4: ≥500 Hz feasible)
 BUFFER_SECONDS = 60.0     # retention == widest selectable plot window
 
-_WINDOW_CHOICES = [("5 s", 5.0), ("30 s", 30.0), ("60 s", 60.0)]
+_WINDOW_CHOICES = [("5 s", 5.0), ("10 s", 10.0), ("30 s", 30.0), ("60 s", 60.0)]
 
 
 class SampleBuffer:
@@ -97,9 +97,9 @@ class PlotWindow(QWidget):
 
     def __init__(self, backend) -> None:
         super().__init__()
-        # ponytail: full redraw of ≤600 points per curve every 100 ms instead
-        # of incremental append — fast enough by orders of magnitude; switch
-        # only if profiling ever says otherwise.
+        # ponytail: full redraw of ≤6000 points per curve at 25 Hz instead of
+        # incremental append — fast enough by orders of magnitude; switch only
+        # if profiling ever says otherwise.
         self._backend = backend
         self.setWindowTitle("ODrive Live Plot")
         self.resize(700, 700)
@@ -109,7 +109,7 @@ class PlotWindow(QWidget):
         bar = QHBoxLayout()
         combo = QComboBox()
         combo.addItems([label for label, *_ in _WINDOW_CHOICES])
-        combo.setCurrentIndex(1)
+        combo.setCurrentIndex(2)
         combo.currentIndexChanged.connect(self._on_window_changed)
         self._pause_btn = QPushButton("Pause")
         self._pause_btn.setCheckable(True)
@@ -133,6 +133,9 @@ class PlotWindow(QWidget):
             # Fixed x: whole selected interval on every row, no wiggle;
             # y keeps autorange; x-pan/zoom disabled.
             plot.setMouseEnabled(x=False)
+            # Raw values, no SI prefixes ("100 mN·m" reads like an error);
+            # all channels on a row share one unit so this is safe.
+            plot.getAxis("left").enableAutoSIPrefix(False)
             plot.addLegend(offset=(5, 5))
             if first is None:
                 first = plot
@@ -170,8 +173,11 @@ class PlotWindow(QWidget):
         backend.modeChanged.connect(self._update_rows)
         self._update_rows()
 
+        # Redraw at 25 Hz regardless of the 100 Hz sampling rate — plenty for
+        # a plot, and keeps 6000-point/curve refreshes off the GUI thread hot
+        # path (60 s window).
         timer = QTimer(self)
-        timer.setInterval(int(SAMPLE_INTERVAL_S * 1000))
+        timer.setInterval(40)
         timer.timeout.connect(self.refresh)
         timer.start()
 

@@ -33,9 +33,9 @@ def test_missing_channels_are_nan():
 
 
 def test_ring_retention():
-    buf = SampleBuffer()  # default 60 s / 0.1 s
+    buf = SampleBuffer()  # default 60 s / 0.01 s
     now = time.time()
-    for i in range(700):  # more than maxlen (600)
+    for i in range(7000):  # more than maxlen (6000)
         buf.append(now + i * SAMPLE_INTERVAL_S, {"vel": float(i)})
     assert len(buf.rows) == int(BUFFER_SECONDS / SAMPLE_INTERVAL_S)
 

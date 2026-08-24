@@ -71,6 +71,7 @@ ApplicationWindow {
                 id: stateCombo
                 model: backend.stateNames
                 enabled: statusBackend.connected
+                implicitContentWidthPolicy: ComboBox.WidestText
             }
             Button {
                 text: "Start"
@@ -97,6 +98,7 @@ ApplicationWindow {
                         objectName: "modeCombo"
                         model: backend.modeNames
                         currentIndex: backend.currentMode
+                        implicitContentWidthPolicy: ComboBox.WidestText
                         onActivated: backend.setMode(currentText)
                     }
                     Label { text: "Input Mode:" }
@@ -105,6 +107,7 @@ ApplicationWindow {
                         objectName: "inputCombo"
                         model: backend.inputModes
                         currentIndex: backend.currentInputMode
+                        implicitContentWidthPolicy: ComboBox.WidestText
                         onActivated: backend.setInputMode(currentIndex)
                     }
                     Item { Layout.fillWidth: true }
@@ -125,9 +128,9 @@ ApplicationWindow {
                 }
                 SetpointRow {
                     objectName: "torqueSetpoint"
-                    label: "Torque Setpoint (A):"
+                    label: "Torque Setpoint (N·m):"
                     backendValue: backend.torqueSetpoint
-                    pointMin: -10; pointMax: 10; decimals: 3; step: 0.1
+                    pointMin: -10; pointMax: 10; decimals: 3; step: 0.01
                     visible: backend.currentMode === 2
                     onCommitted: function(v) { backend.setActiveSetpoint(v) }
                 }
@@ -139,14 +142,6 @@ ApplicationWindow {
                     pointMin: -1e6; pointMax: 1e6; decimals: 4; step: 0.01
                     visible: backend.currentMode === 1
                     onCommitted: function(v) { backend.setActiveSetpoint(v) }
-                }
-
-                RowLayout {
-                    Button {
-                        text: "Apply Setpoint"
-                        onClicked: backend.applySetpoint()
-                    }
-                    Item { Layout.fillWidth: true }
                 }
             }
         }

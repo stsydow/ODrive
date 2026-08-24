@@ -136,15 +136,24 @@ class ErrorReport:
   and refreshes itself by observing appended entries (via the `log_updated` Qt signal).
 - The viewer works even while disconnected, so the run-up to a disconnect is visible.
 
-#### 2.4 Config Browser (Read-Only) ⬜ TODO
+#### 2.4 Config Browser (Read + IDLE-Gated Write) ⬜ TODO
 
-`QDialog` + `QTreeWidget` walking the ODrive object tree recursively. Full config view without `odrivetool`. **Safety:** Recursion depth limited to prevent infinite loops on circular references. Only primitive values and sub-objects displayed (no callable traversal).
+QML `Window` + `TreeView` walking the live ODrive object graph recursively. Full config view **and edit** without `odrivetool`. Decisions:
+
+- **Structure** is walked eagerly from the local Python object graph (`getattr` recursion — attribute names cost no USB traffic; only leaf *values* do). Recursion capped at `MAX_DEPTH = 7` (deepest chain in `Firmware/odrive-interface.yaml` is 5 levels: `odrv → axis → motor/controller → config → sub-config`; +2 slack). Callables and endpoint refs are not traversed.
+- **Values load lazily** on subtree expansion, plus a manual Refresh button. No continuous polling — it would fight the 100 ms main poll over the same USB link.
+- **Name filter**: case-insensitive text box filtering the tree by path name.
+- **Editable = `.config` leaves only** (float/int/bool). Everything else (estimates, errors, states) is read-only display; enum-valued leaves show and edit as raw ints (odrivetool parity; names can come later if misread).
+- **Edit UX**: right-click on an editable leaf → small OK/cancel dialog that commits on OK.
+- **IDLE gating with commit-time re-check:** writes are only committed when the axis is IDLE; the gate is checked again at commit time (refuse + event-log if the state changed while the editor was open). Rationale: raw config changes while running can cause bad control behavior.
+  - This gate also applies to the **Electrical Limits** and **Mechanical Limits** settings tabs (§1.1). The **Control Parameters tab stays write-anytime** — online gain tuning is handy, and a bad value trips the limit error rather than causing silent misbehavior.
+- Every write lands in the event log (`WRITE` entry), like all device writes.
 
 #### 2.5 Integration ✅ (errors) / ⬜ (config browser)
 
 - `errors.py` provides: structured error decoding (`ErrorReport`/`ErrorModule` dataclasses) and the `ErrorDialog` (current decoded errors + clear) that replaces the raw-integer error label. ✅
 - `eventlog.py` provides the time-stamped event log (`LogEntry`/`format_log`) and `LogDialog` (Debug > Event Log…, offline-capable, non-modal + live via an observation signal, export). ✅
-- `controls.py` also provides the read-only Config Browser dialog (`QDialog` + `QTreeWidget`). ⬜ not yet implemented
+- `controls.py` also provides the read-only Config Browser dialog (`QDialog` + `QTreeWidget`). ⬜ superseded — see §2.4 (QML browser with IDLE-gated write)
 - Device menu: the standalone "Dump Errors…"/"Clear Errors" become a single "Errors…" action (plus a clickable `Err:` footer field) that opens the error dialog; "Config Browser…" still to be added. ✅ / ⬜
 
 ### Phase 2.5: Migrate UI to QML (DONE ✅)
@@ -286,9 +295,9 @@ Implemented in `monitoring.py` (+ sampling in `backend.py`, Device > Live Plot�
   mechanical/electrical power (`controller.mechanical_power` /
   `electrical_power`), bus current (`motor.I_bus`), velocity integrator torque
   (`controller.vel_integrator_torque`).
-- Sampling runs every poll (100 ms) in `updateReadings` regardless of the window
+- Plot sampling runs at **100 Hz** on its own 10 ms timer (`plotTick`) — justified by the §3.4 Step 0 benchmark (~940 Hz × 4 ch ceiling); the status footer/control poll stays at 10 Hz (`updateReadings`). Sampling happens regardless of the window
   being open — history exists when the plot is opened; nothing sampled while
-  disconnected. Fixed-retention ring buffer (`SampleBuffer`, 60 s @ 10 Hz).
+  being open; nothing sampled while disconnected. Fixed-retention ring buffer (`SampleBuffer`, 60 s @ 100 Hz).
 - Window selector 5/30/60 s; Pause freezes redraw only — sampling continues,
   resume shows an unbroken trace. Full redraw of ≤600 pts/curve at 10 Hz
   (`connect="finite"`) instead of incremental append.
@@ -304,6 +313,26 @@ Implemented in `monitoring.py` (+ sampling in `backend.py`, Device > Live Plot�
 
 ✅ `pyqtgraph` in `requirements.txt` (installed via `uv pip install pyqtgraph`).
 CSV export reuses `SampleBuffer.csv()` (header = channel labels).
+
+#### 3.4 Oscilloscope Recording
+
+One-shot capture-and-plot, beside the live plot (not replacing it): click Record, capture for an interval, plot the recording. Two stages plus a measurement step:
+
+**Step 0 — poll-rate benchmark** (`tools/bench_poll_rate.py`, CLI against real hardware) ✅ DONE:
+reads the position estimate 4000 times with timestamps, prints sustained sample rate and inter-sample gap jitter. Decision bar: ≥100 Hz × 3 channels = useful, ~200 Hz × 4 channels = good — measured single-channel rate is an upper bound, so divide it by 3–4 for per-channel rate before judging.
+
+**Measured (real hardware):** 3768 Hz single-channel (`axis0.encoder.pos_estimate`), gap jitter 0.25 ms median / 0.51 ms p99 ⇒ per-channel ceiling ~940 Hz × 4 ch. Bar cleared by ~5×; Stage A is viable at 500–1000 Hz × 4 channels.
+
+**Stage A — interim GUI recorder** (conditional on Step 0 meeting the bar):
+- Channel checkboxes generated from the `monitoring.CHANNELS` registry (same readers as §3.1).
+- Interval spinbox in the dialog. During recording the recorder temporarily *is* the poller: stop `update_timer`, run the fast read loop, restart — no parallel-sampling coordination.
+- Each recording opens a new pyqtgraph window using the same plot layout as §3.1; recordings can be compared side-by-side.
+- Save button per window → CSV export (reuses `SampleBuffer.csv()`).
+- Purpose meanwhile: judge sensor noise and control lag. It cannot see inside the control loop.
+
+**Stage B — firmware oscilloscope extension** (kept, not scheduled): the firmware's built-in `oscilloscope` object samples at the **control-loop rate, 8 kHz** (TIM1/8 @ 168 MHz, `PERIOD_CLOCKS=3500`, `RCR=2` ⇒ `CURRENT_MEAS_HZ = 8000`; `oscilloscope_.update()` runs inside `control_loop_cb()`, loop-synchronous with current sampling). Its 4096-sample buffer gives **T_max ≈ 0.51 s per recording**. Currently dead code: `trigger_src`/`data_src` are hardwired to `nullptr` at compile time (`Firmware/MotorControl/odrive_main.h`). Wiring 4–8 real endpoints in is a separate self-contained firmware change (like the friction-compensation work in Phase 4).
+
+Complementary to Stage A rather than competing: Stage B's value is capturing **one loop-internal signal at full 8 kHz resolution** over half a second (e.g. `Iq_setpoint` vs `Iq_measured`) — what §4.3 step-response tuning will want. For multi-channel noise/lag surveys, Stage A wins on channels × duration; GUI reads can't see inside the control loop either way.
 
 ### Phase 4: Torque Drive + Calibration + Dynamics (NEXT ⬜)
 
@@ -414,11 +443,12 @@ All device communication follows this pattern:
 try:
     value = self.axis.controller.config.vel_gain  # or any device read/write
 except Exception as e:
-    self._read_failed("vel_gain", e)  # increments failure counter, triggers reconnect if needed
+    self._read_failed("vel_gain", e)  # drops the link, auto-reconnects
 ```
 
-- **Read failures:** Counted per-read. After 5 consecutive failures (~0.5 s), trigger reconnect.
-- **Write failures:** Shown immediately in status bar. Not fatal — device may be in a transient state.
+- **Read failures:** Single strike — any transport failure drops the link immediately and auto-reconnects. The worker blocks in `find_any()` until the device reappears; that blocking wait *is* the reconnect mechanism.
+  - **Known ceiling:** if the discovery layer itself wedges, `_connecting` stays set and only a GUI restart recovers.
+- **Write failures:** Shown immediately (event log / status feedback). Not fatal — device may be in a transient state.
 - **Calibration errors:** Decoded via standard bitmask logic, shown in the wizard step with a hint. User can retry or skip.
 
 ### 4.2 Feature Availability (Feature Detection)

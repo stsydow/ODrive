@@ -47,9 +47,9 @@ RECONNECT_RETRY_DELAY_MS = 1000
 
 # Control mode <-> display name (order defines the mode-combo index).
 MODE_NAMES = {
-    CONTROL_MODE_VELOCITY_CONTROL: "Velocity Control",
-    CONTROL_MODE_POSITION_CONTROL: "Position Control",
-    CONTROL_MODE_TORQUE_CONTROL: "Torque Control",
+    CONTROL_MODE_VELOCITY_CONTROL: "Velocity",
+    CONTROL_MODE_POSITION_CONTROL: "Position",
+    CONTROL_MODE_TORQUE_CONTROL: "Torque",
 }
 _MODE_ORDER = (CONTROL_MODE_VELOCITY_CONTROL,
                CONTROL_MODE_POSITION_CONTROL,
@@ -180,6 +180,12 @@ class GuiBackend(QObject):
         self.update_timer.timeout.connect(self.updateReadings)
         self.update_timer.start(100)
 
+        # Plot sampling at 100 Hz on its own tick (Plan §3.4 Step 0 benchmark:
+        # ~940 Hz x 4 ch ceiling); the status/footer poll stays at 10 Hz.
+        self.plot_timer = QTimer()
+        self.plot_timer.timeout.connect(self.plotTick)
+        self.plot_timer.start(10)
+
         QTimer.singleShot(500, self.connectOdrive)
 
     # -- static models (combo contents) --------------------------------
@@ -279,6 +285,9 @@ class GuiBackend(QObject):
     def _on_device_lost(self, _future):
         logger.warning("on_device_lost: connection lost (thread=%s)",
                        threading.current_thread().name)
+        # Drop immediately so poll ticks stop hitting the dead object
+        # (the reconnect itself must run on the Qt thread).
+        self.odrive = None
         self.logEvent("CONNECT", "device lost, reconnecting")
         QTimer.singleShot(0, self, self.connectOdrive)
 
@@ -676,17 +685,36 @@ class GuiBackend(QObject):
             if self.status_backend.update_readings(self.odrive, self._axis(), self.logEvent):
                 self.errorsChanged.emit()
             self._read_estimates()
-            self._sample_plot()
-        except (*DEVICE_EXCEPTIONS, AttributeError):
-            # AttributeError: once fibre destroys a lost object its class is
-            # swapped to EmptyInterface, so late accesses raise AttributeError
-            # rather than ObjectLostError (see LibFibre._release_py_obj).
+        except (*DEVICE_EXCEPTIONS, AttributeError, TypeError) as e:
+            # AttributeError/TypeError: while fibre destroys a lost object its
+            # class is swapped to EmptyInterface mid-flight, so late accesses
+            # raise AttributeError or a libfibre TypeError rather than
+            # ObjectLostError (see LibFibre._release_py_obj).
             # ponytail: any transport hiccup drops the link and reconnects;
             # widen to an N-strike counter here if USB proves flaky.
-            logger.warning("updateReadings: read failed, reconnecting", exc_info=True)
-            self.status_backend.set_conn("\u25cf Offline", "gray", False)
-            self.odrive = None
-            self.connectOdrive()
+            self._drop_link("updateReadings", e)
+
+    def plotTick(self):
+        """100 Hz plot sampling; same failure handling as the main poll."""
+        if self.odrive is None:
+            return
+        try:
+            self._sample_plot()
+        except (*DEVICE_EXCEPTIONS, AttributeError, TypeError) as e:
+            self._drop_link("plotTick", e)
+
+    def _drop_link(self, where, exc):
+        """Shared transport-failure path: drop the link and auto-reconnect.
+
+        One line with type+message, no traceback: on_device_lost already logs
+        the cause, and at plot tick rate this fires within milliseconds of
+        any disconnect — a stack trace per disconnect is pure noise.
+        """
+        logger.warning("%s: read failed (%s: %s), reconnecting", where,
+                       type(exc).__name__, exc)
+        self.status_backend.set_conn("\u25cf Offline", "gray", False)
+        self.odrive = None
+        self.connectOdrive()
 
     # -- live plot (Plan §3.1) -----------------------------------------
 
@@ -705,9 +733,8 @@ class GuiBackend(QObject):
         self._plot_window.activateWindow()
 
     def _sample_plot(self):
-        """Append one plot sample per poll; missing endpoints become NaN.
-
-        Runs every poll regardless of the window being open, so opening the
+        """Append one plot sample per plot tick (100 Hz); missing endpoints
+        become NaN. Runs regardless of the window being open, so opening the
         plot later already shows history. getattr-gated like everything else
         (AttributeError here would falsely trigger a reconnect).
         """

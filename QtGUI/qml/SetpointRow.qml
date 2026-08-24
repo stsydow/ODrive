@@ -37,6 +37,13 @@ RowLayout {
         color: "gray"
         visible: control.estimate.length > 0
     }
+    Button {
+        // Must parse the displayed text like the Enter path below: typed text
+        // is not committed to spin.value until focus loss, so a bare
+        // applySetpoint() would send the previously stored setpoint.
+        text: "Apply"
+        onClicked: control.applyDisplayed()
+    }
     Item { Layout.fillWidth: true }
 
     // Re-sync the box from the device whenever the backend setpoint updates.
@@ -49,18 +56,20 @@ RowLayout {
         }
     }
 
-    // Enter confirms the edit and applies it to the device (Apply button
-    // equivalent). Hook the inner TextInput's accepted() — it consumes Return,
-    // so Keys.* on the spinbox never see it. Parse the displayed text here:
-    // relying on SpinBox's internal commit order made the first Enter apply
-    // the previously stored value.
+    // Enter and Apply share one path: parse the displayed text (see Apply
+    // comment), store it, then write it to the device.
+    function applyDisplayed() {
+        backend.setActiveSetpoint(
+                    spin.valueFromText(spin.contentItem.text, Qt.locale()))
+        backend.applySetpoint()
+    }
+    // Enter confirms the edit and applies it to the device. Hook the inner
+    // TextInput's accepted() — it consumes Return, so Keys.* on the spinbox
+    // never see it.
     Connections {
         target: spin.contentItem
         function onAccepted() {
-            // locale arg required: without it valueFromText's default impl
-            // calls Number.fromLocaleString(undefined, ...) -> hard error.
-            backend.setActiveSetpoint(spin.valueFromText(spin.contentItem.text, Qt.locale()))
-            backend.applySetpoint()
+            control.applyDisplayed()
         }
     }
 }
