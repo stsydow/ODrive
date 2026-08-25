@@ -6,6 +6,7 @@ indicator). The chronological event log lives in `eventlog.py`.
 """
 
 import asyncio
+import ctypes
 import logging
 import time
 from dataclasses import dataclass, field
@@ -26,6 +27,24 @@ DEVICE_EXCEPTIONS = (
     OSError,          # transport / I/O (ConnectionError is a subclass)
     asyncio.CancelledError,
 )
+
+# One logical condition -- "the object/link is gone" -- escapes libfibre as
+# four different exception types depending on teardown timing:
+#   ObjectLostError        kFibreHostUnreachable
+#   EOFError               kFibreClosed
+#   asyncio.CancelledError kFibreCancelled
+#   ctypes.ArgumentError   kFibreInvalidArgument (destroyed C handle; libfibre
+#                          reuses ctypes' class via `from ctypes import *`,
+#                          it is NOT a Python marshalling error)
+# All four route to the drop-link path. Bare Exception("internal libfibre
+# error"/"peer misbehaving", kFibreInternalError/ProtocolError) is
+# deliberately NOT included: indistinguishable from real bugs, must surface.
+LINK_FAILURES = (*DEVICE_EXCEPTIONS, ctypes.ArgumentError)
+
+# Everything the guarded read paths (poll ticks, IDLE gate) must never let
+# escape: LINK_FAILURES plus the AttributeError/TypeError raised when the
+# proxy class is swapped to EmptyInterface mid-flight (libfibre).
+TRANSPORT_ERRORS = (*LINK_FAILURES, AttributeError, TypeError)
 
 logger = logging.getLogger(__name__)
 

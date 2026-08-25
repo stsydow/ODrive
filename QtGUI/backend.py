@@ -37,7 +37,7 @@ from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from configtree import ConfigTreeModel
-from errors import DEVICE_EXCEPTIONS
+from errors import DEVICE_EXCEPTIONS, TRANSPORT_ERRORS
 from eventlog import LogEntry, format_log
 from monitoring import PlotWindow, SampleBuffer
 from status_backend import STATE_MAP, StatusBackend
@@ -535,7 +535,7 @@ class GuiBackend(QObject):
         axis = self._axis()
         try:
             idle = axis is not None and axis.current_state == AXIS_STATE_IDLE
-        except (*DEVICE_EXCEPTIONS, AttributeError, TypeError):
+        except TRANSPORT_ERRORS:
             idle = False
         if not idle:
             self.logEvent("WRITE", f"refused {label} (axis not IDLE)")
@@ -769,7 +769,7 @@ class GuiBackend(QObject):
             if self.status_backend.update_readings(self.odrive, self._axis(), self.logEvent):
                 self.errorsChanged.emit()
             self._read_estimates()
-        except (*DEVICE_EXCEPTIONS, AttributeError, TypeError) as e:
+        except TRANSPORT_ERRORS as e:
             # AttributeError/TypeError: while fibre destroys a lost object its
             # class is swapped to EmptyInterface mid-flight, so late accesses
             # raise AttributeError or a libfibre TypeError rather than
@@ -784,7 +784,7 @@ class GuiBackend(QObject):
             return
         try:
             self._sample_plot()
-        except (*DEVICE_EXCEPTIONS, AttributeError, TypeError) as e:
+        except TRANSPORT_ERRORS as e:
             self._drop_link("plotTick", e)
 
     def _drop_link(self, where, exc):
