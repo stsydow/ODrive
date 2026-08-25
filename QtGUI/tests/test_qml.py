@@ -7,8 +7,9 @@ is required.
 """
 
 from odrive.enums import INPUT_MODE_POS_FILTER, INPUT_MODE_TRAP_TRAJ
-from PySide6.QtCore import QEvent, QEventLoop, QObject, Qt, QTimer
+from PySide6.QtCore import QEvent, QEventLoop, QObject, Qt, QTimer, QUrl
 from PySide6.QtGui import QGuiApplication, QKeyEvent
+from PySide6.QtQml import QQmlApplicationEngine
 
 
 def _find_qml(root, object_name):
@@ -26,6 +27,7 @@ def test_dialogs_and_combos_present(qml):
     assert _find_qml(root, "errorDialog") is not None
     assert _find_qml(root, "eventLogDialog") is not None
     assert _find_qml(root, "deviceInfoDialog") is not None
+    assert _find_qml(root, "configBrowserDialog") is not None
     assert _find_qml(root, "modeCombo") is not None
     assert _find_qml(root, "inputCombo") is not None
 
@@ -123,3 +125,34 @@ def test_input_mode_combo_links_to_control_mode(qml, backend):
     _process_events(qml)
     assert input_combo.property("currentText") == "Position Filter"
     assert backend.odrive.axis0.controller.config.input_mode == INPUT_MODE_POS_FILTER
+
+
+def test_browser_model_methods_callable_from_qml(backend, qapp, tmp_path):
+    """P1 regression guard: ConfigTreeModel.reset()/set_filter() must stay
+    @Slot-decorated. Undecorated Python methods on a QObject are invisible
+    to QML ("Property 'reset' ... is not a function"), which silently broke
+    the browser dialog's Refresh button and name filter once."""
+    probe = '''
+import QtQuick
+Item {
+    property string result: ""
+    Component.onCompleted: {
+        try {
+            backend.browserModel.reset()
+            backend.browserModel.set_filter("vel")
+            result = "OK callable from QML"
+        } catch (e) {
+            result = "FAIL: " + e
+        }
+    }
+}
+'''
+    path = tmp_path / "browser_probe.qml"
+    path.write_text(probe)
+    eng = QQmlApplicationEngine()
+    eng.rootContext().setContextProperty("backend", backend)
+    eng.rootContext().setContextProperty("statusBackend", backend.status_backend)
+    eng.load(QUrl.fromLocalFile(str(path)))
+    assert eng.rootObjects(), "probe QML failed to load"
+    assert eng.rootObjects()[0].property("result") == "OK callable from QML"
+    eng.deleteLater()

@@ -45,7 +45,10 @@ RowLayout {
         editable: true
         // Write-on-change: valueModified fires only on interactive edits, so
         // the programmatic set in sync() does not echo back into setConfig.
-        onValueModified: backend.setConfig(control.base, control.attr, spin.value)
+        // A failed write resyncs the spinbox from the device immediately
+        // (no unapplied value lingering until the next reconnect resync).
+        onValueModified: if (!backend.setConfig(control.base, control.attr, spin.value))
+                             spin.value = backend.getConfig(control.base, control.attr)
         ToolTip.visible: hovered && control.tip.length > 0
         ToolTip.text: control.tip || control.base + ".config." + control.attr
     }

@@ -19,8 +19,10 @@ RowLayout {
         id: chk
         text: control.label
         // toggled fires only on user interaction; the programmatic set in
-        // sync() does not echo back into setConfig.
-        onToggled: backend.setConfig(control.base, control.attr, chk.checked)
+        // sync() does not echo back into setConfig. Failed writes resync
+        // from the device (same rule as SpinRow).
+        onToggled: if (!backend.setConfig(control.base, control.attr, chk.checked))
+                       chk.checked = backend.getConfig(control.base, control.attr) !== 0
         ToolTip.visible: hovered && control.tip.length > 0
         ToolTip.text: control.tip || control.base + ".config." + control.attr
     }

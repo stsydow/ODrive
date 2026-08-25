@@ -42,7 +42,9 @@ what remains.
 ```
 QtGUI/
 ├── main.py              # App entry, main window, connection, menu bar, readings  ✅
-├── controls.py          # Control settings: gains, limits, input mode, feed-fwd   ✅
+├── backend.py           # GuiBackend(QObject): single QML-facing API (device logic)  ✅
+├── status_backend.py    # StatusBackend(QObject): status-footer state              ✅
+├── configtree.py        # Config Browser tree model over the device graph (§2.4)   ✅
 ├── errors.py            # Current error decode + dialog (Phase 2)                ✅
 ├── eventlog.py          # In-memory UI/device event log + viewer (Debug menu)   ✅
 ├── monitoring.py        # Live plot: sample buffer + pyqtgraph window (Phase 3)   ✅
@@ -98,11 +100,9 @@ Dropdown with the relevant modes. The sewing machine recommendation is **VEL_RAM
 - `controls.py` provides a `SettingsTabs(QTabWidget)` (live-editable gain/limit/feed-forward spinboxes, read from device on connect) and an `InputModeSelector(QComboBox)`.
 - Placed as a plain "Control Settings" section in the main window below the existing velocity control section (the box is *not* collapsible — it's always visible).
 
-### Phase 2: Error Display & Config Browser (PARTIALLY DONE ✅/⬜)
+### Phase 2: Error Display & Config Browser ✅ DONE
 
 **Goal:** Replace the raw integer error with decoded, actionable info, and add a full config tree.
-
-Error display (2.1–2.3) is done; the Config Browser (2.4) is not yet implemented.
 
 #### 2.1 Error Decoding (`errors.py`) ✅
 
@@ -136,7 +136,7 @@ class ErrorReport:
   and refreshes itself by observing appended entries (via the `log_updated` Qt signal).
 - The viewer works even while disconnected, so the run-up to a disconnect is visible.
 
-#### 2.4 Config Browser (Read + IDLE-Gated Write) ⬜ TODO
+#### 2.4 Config Browser (Read + IDLE-Gated Write) ✅ DONE
 
 QML `Window` + `TreeView` walking the live ODrive object graph recursively. Full config view **and edit** without `odrivetool`. Decisions:
 
@@ -144,17 +144,18 @@ QML `Window` + `TreeView` walking the live ODrive object graph recursively. Full
 - **Values load lazily** on subtree expansion, plus a manual Refresh button. No continuous polling — it would fight the 100 ms main poll over the same USB link.
 - **Name filter**: case-insensitive text box filtering the tree by path name.
 - **Editable = `.config` leaves only** (float/int/bool). Everything else (estimates, errors, states) is read-only display; enum-valued leaves show and edit as raw ints (odrivetool parity; names can come later if misread).
-- **Edit UX**: right-click on an editable leaf → small OK/cancel dialog that commits on OK.
+- **Edit UX**: an `edit` button on each writable leaf opens a small OK/cancel dialog that commits on OK.
 - **IDLE gating with commit-time re-check:** writes are only committed when the axis is IDLE; the gate is checked again at commit time (refuse + event-log if the state changed while the editor was open). Rationale: raw config changes while running can cause bad control behavior.
   - This gate also applies to the **Electrical Limits** and **Mechanical Limits** settings tabs (§1.1). The **Control Parameters tab stays write-anytime** — online gain tuning is handy, and a bad value trips the limit error rather than causing silent misbehavior.
 - Every write lands in the event log (`WRITE` entry), like all device writes.
 
-#### 2.5 Integration ✅ (errors) / ⬜ (config browser)
+#### 2.5 Integration ✅ (errors + config browser)
 
 - `errors.py` provides: structured error decoding (`ErrorReport`/`ErrorModule` dataclasses) and the `ErrorDialog` (current decoded errors + clear) that replaces the raw-integer error label. ✅
 - `eventlog.py` provides the time-stamped event log (`LogEntry`/`format_log`) and `LogDialog` (Debug > Event Log…, offline-capable, non-modal + live via an observation signal, export). ✅
 - `controls.py` also provides the read-only Config Browser dialog (`QDialog` + `QTreeWidget`). ⬜ superseded — see §2.4 (QML browser with IDLE-gated write)
-- Device menu: the standalone "Dump Errors…"/"Clear Errors" become a single "Errors…" action (plus a clickable `Err:` footer field) that opens the error dialog; "Config Browser…" still to be added. ✅ / ⬜
+- Config Browser implemented as `configtree.py` (`ConfigTreeModel`) + `qml/ConfigBrowserDialog.qml` (Device > Config Browser…): lazy subtree walk, name filter, per-row `edit` buttons for `.config` bool/int/float leaves, IDLE-gated writes with commit-time re-check (`backend.writeBrowserValue`). The Electrical/Mechanical Limits tabs use the same gate via Qt's enablement cascade: they bind `enabled: connected && backend.axisIdle`, so their rows can't fire while the axis runs (residual ≤100 ms poll-lag race accepted; firmware enforces real safety). ✅
+- Device menu: the standalone "Dump Errors…"/"Clear Errors" become a single "Errors…" action (plus a clickable `Err:` footer field) that opens the error dialog; "Config Browser…" added beside Live Plot. ✅
 
 ### Phase 2.5: Migrate UI to QML (DONE ✅)
 

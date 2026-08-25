@@ -36,6 +36,7 @@ from odrive.enums import (
 from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+from configtree import ConfigTreeModel
 from errors import DEVICE_EXCEPTIONS
 from eventlog import LogEntry, format_log
 from monitoring import PlotWindow, SampleBuffer
@@ -150,6 +151,7 @@ class GuiBackend(QObject):
     inputModeModelChanged = Signal()  # inputModes / currentInputMode
     setpointChanged = Signal()        # vel/torque/pos setpoints
     verboseChanged = Signal()         # verbose
+    idleChanged = Signal()            # axisIdle
     logUpdated = Signal()             # a LogEntry was appended
     errorsChanged = Signal()
 
@@ -163,6 +165,7 @@ class GuiBackend(QObject):
 
         # QML-bound state
         self._closed_loop = False
+        self._axis_idle = False
         self._current_mode = 0  # index into _MODE_ORDER
         self._active_mode_enum = CONTROL_MODE_VELOCITY_CONTROL
         self._input_modes = []
@@ -175,6 +178,7 @@ class GuiBackend(QObject):
         self.event_log = deque(maxlen=1000)
         self.samples = SampleBuffer()
         self._plot_window = None
+        self._config_model = ConfigTreeModel(self)
 
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.updateReadings)
@@ -201,6 +205,10 @@ class GuiBackend(QObject):
     @Property(bool, notify=closedLoopChanged)
     def closedLoop(self):
         return self._closed_loop
+
+    @Property(bool, notify=idleChanged)
+    def axisIdle(self):
+        return self._axis_idle
 
     @Property(bool, notify=verboseChanged)
     def verbose(self):
@@ -277,6 +285,7 @@ class GuiBackend(QObject):
 
         self._sync_setpoint_from_device()
         self.status_backend.set_conn("\u25cf Online", "green", True)
+        self._config_model.reset()  # re-root the Config Browser (§2.4)
         # Input-mode model is built by the first poll tick (<100 ms away) via
         # _sync_mode -> _input_mode_model_for; nothing extra to do here.
         self.logEvent("CONNECT", "online (axis0 wired)")
@@ -492,20 +501,45 @@ class GuiBackend(QObject):
         if running != self._closed_loop:
             self._closed_loop = running
             self.closedLoopChanged.emit()
+        idle = (axis is not None and axis.current_state == AXIS_STATE_IDLE)
+        if idle != self._axis_idle:
+            self._axis_idle = idle
+            self.idleChanged.emit()  # drives the limits tabs' disabled state
 
     # -- settings write-back (2.5.3) -----------------------------------
 
-    @Slot(str, str, float)
+    @Slot(str, str, float, result=bool)
     def setConfig(self, base, attr, value):
-        """Write a settings value: base is motor/controller/axis/odrive."""
+        """Write a settings value: base is motor/controller/axis/odrive.
+
+        Returns True iff the device accepted the write, so a failed write
+        can be resynced from the device immediately (SpinRow/CheckRow).
+        Not IDLE-gated here: the Electrical/Mechanical tabs disable
+        themselves while the axis runs (QML enabled cascade), so their rows
+        can't fire. Only the Config Browser's long-lived editor needs the
+        commit-time re-check (writeBrowserValue).
+        """
         obj = self._config_obj(base)
         if obj is None or not hasattr(obj.config, attr):
-            return
+            return False
         try:
             setattr(obj.config, attr, value)
-            self.logEvent("WRITE", f"{base}.{attr} -> {value}")
         except DEVICE_EXCEPTIONS as e:
             self.logEvent("WRITE", f"failed to set {attr}: {e}")
+            return False
+        self.logEvent("WRITE", f"{base}.{attr} -> {value}")
+        return True
+
+    def _ensure_idle_for_write(self, label):
+        """Commit-time IDLE gate: True iff the axis is IDLE right now."""
+        axis = self._axis()
+        try:
+            idle = axis is not None and axis.current_state == AXIS_STATE_IDLE
+        except (*DEVICE_EXCEPTIONS, AttributeError, TypeError):
+            idle = False
+        if not idle:
+            self.logEvent("WRITE", f"refused {label} (axis not IDLE)")
+        return idle
 
     @Slot(str, str, result=bool)
     def hasConfig(self, base, attr):
@@ -530,6 +564,56 @@ class GuiBackend(QObject):
         if base == "odrive":
             return self.odrive
         return getattr(axis, base, None)
+
+    # -- config browser (Plan §2.4) --------------------------------------
+
+    @Property(QObject, constant=True)
+    def browserModel(self):
+        return self._config_model
+
+    @staticmethod
+    def _parse_like(text, cur):
+        """Parse `text` as the same type as `cur` (bool/int/float); raises
+        ValueError. Ints accept 0x hex for odrivetool parity (enum leaves)."""
+        s = text.strip()
+        if isinstance(cur, bool):
+            low = s.lower()
+            if low in ("true", "1"):
+                return True
+            if low in ("false", "0"):
+                return False
+            raise ValueError(s)
+        if isinstance(cur, int):
+            return int(s, 0)
+        value = float(s)
+        if not math.isfinite(value):  # nan/inf must never reach the device
+            raise ValueError(s)
+        return value
+
+    @Slot(str, str, result=bool)
+    def writeBrowserValue(self, path, text):
+        """Commit a Config Browser edit: type-checked against the current
+        value, IDLE-gated with commit-time re-check (§2.4)."""
+        target = self._config_model.resolve(path)
+        if target is None:
+            self.logEvent("WRITE", f"refused {path}: not an editable config value")
+            return False
+        container, attr, cur = target
+        try:
+            value = self._parse_like(text, cur)
+        except ValueError:
+            self.logEvent("WRITE", f"refused {path}: '{text}' is not {type(cur).__name__}")
+            return False
+        if not self._ensure_idle_for_write(path):
+            return False
+        try:
+            setattr(container, attr, value)
+        except DEVICE_EXCEPTIONS as e:
+            self.logEvent("WRITE", f"failed to write {path}: {e}")
+            return False
+        self.logEvent("WRITE", f"{path} -> {value}")
+        self._config_model.invalidate(path, value)
+        return True
 
     # -- device menu actions -------------------------------------------
 

@@ -40,14 +40,17 @@ hardware-coupled, testable logic in Python.
 QtGUI/
 ├── main.py        # App entry: QApplication + QQmlApplicationEngine + context wiring
 ├── backend.py     # GuiBackend(QObject): the single QML-facing API (all device logic)
+├── configtree.py  # ConfigTreeModel: object-graph tree model for the Config Browser
 ├── errors.py      # Error decode (read_error_report) + text formatting (pure logic)
 ├── eventlog.py    # In-memory event log + formatting (LogEntry/format_log, pure logic)
+├── monitoring.py  # Live plot: channel registry + SampleBuffer + pyqtgraph PlotWindow
 ├── status_backend.py # StatusBackend(QObject): status-footer state (conn/state/errors/VBus/Power)
 ├── qml/
 │   ├── main.qml            # ApplicationWindow: menubar, control bar, footer, command, settings
 │   ├── SetpointRow.qml     # reusable Control Command setpoint row (DoubleSpinBox)
-│   ├── SpinRow.qml / CheckRow.qml   # reusable settings rows (feature-gated)
-│   └── ErrorDialog / EventLogDialog / DeviceInfoDialog.qml  # movable Window dialogs
+│   ├── SpinRow.qml / CheckRow.qml   # reusable settings rows (feature-gated; limits tabs gate via enabled)
+│   ├── StatusBar.qml       # footer status bar (connection/state/error/VBus/power fields)
+│   └── ErrorDialog / EventLogDialog / DeviceInfoDialog / ConfigBrowserDialog.qml  # Window dialogs
 ├── tests/         # headless pytest suite (offscreen, mock ODrive)
 ├── ruff.toml / check.sh   # lint config + static-check + test runner
 ├── Hardware.md            # machine / motor / device-config reference
@@ -114,6 +117,33 @@ so QML accesses it by name everywhere (menus, rows, dialogs); a second context p
   device; user edits stay local (`setActiveSetpoint`) and reach the device only on
   `applySetpoint()` / Enter. The box re-syncs from `backend` on the setpoint-changed
   signal (QML's `valueModified` fires only on interactive edits, so it can't echo back).
+
+## Config Browser (§2.4)
+
+`ConfigTreeModel` (configtree.py) walks the live ODrive object graph for the QML `TreeView`
+in `qml/ConfigBrowserDialog.qml` (Device > Config Browser…). Structure is built lazily per
+subtree expansion (`dir()` + `getattr`, callables skipped, MAX_DEPTH=7); values are read in
+the same walk and cached until Refresh. Editable = leaves under `.config` that are bool/int/
+float; an `edit` button on each writable leaf opens a small OK/cancel editor and
+`backend.writeBrowserValue(path, text)`
+parses the input as the current value's type (ints accept hex for enum leaves), re-checks the
+IDLE gate at commit time, writes, logs a WRITE event and invalidates the view cache. The name
+filter prunes the tree to paths containing the substring — applied on Enter/focus-loss
+(`onEditingFinished`) and matched **name-only**: the scan classifies branches via fibre
+class-member introspection (`RemoteAttribute._magic_getter`), so it never reads scalar
+endpoint values over USB. Transport failures anywhere in the walk follow the same single-strike
+policy as the poll: `_drop_link()` + auto-reconnect (Plan §4.1).
+
+The same IDLE gate backs the Electrical/Mechanical Limits settings tabs — without any flag
+plumbing: those tabs bind `enabled: statusBackend.connected && backend.axisIdle` (the property
+is refreshed by the 100 ms poll in `_sync_closed_loop`), and Qt Quick's enablement cascade
+blocks every row inside. Control Parameters stays write-anytime (online gain tuning). Residual
+gap: a ≤100 ms poll-lag race where a click lands just after the axis left IDLE — accepted,
+since the firmware enforces real safety; only the browser's long-lived editor needs the strict
+commit-time re-check.
+
+# ponytail: the browser's EXPANSION walk reads scalar values too (~40 reads/expansion);
+cheap at the measured ~3.8 kHz link rate. The filter scan is already name-only (see above).
 
 ## Key Design Decisions
 

@@ -8,3 +8,8 @@ line-length = 120
 [lint]
 select = ["E", "F", "I", "UP", "B", "RUF", "BLE", "C"]
 exclude = ["../tools", "../GUI"]
+
+[lint.per-file-ignores]
+# QAbstractItemModel overrides use the Qt-conventional mutable-looking
+# defaults (QModelIndex()); B008's function-call-default rule doesn't apply.
+"configtree.py" = ["B008"]

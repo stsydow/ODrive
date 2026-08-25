@@ -20,6 +20,8 @@ ApplicationWindow {
             MenuSeparator {}
             MenuItem { text: "Live Plot…"; onTriggered: backend.showPlot() }
             MenuSeparator {}
+            MenuItem { text: "Config Browser…"; onTriggered: configBrowserDialog.openBrowser() }
+            MenuSeparator {}
             MenuItem { text: "Errors"; onTriggered: errorDialog.show() }
             MenuSeparator {}
             MenuItem { text: "Device Info"; onTriggered: deviceInfoDialog.show() }
@@ -166,9 +168,10 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     currentIndex: settingsTab.currentIndex
 
-                    // Electrical Limits
+                    // Electrical Limits — whole tab disabled while the axis runs (§2.4)
                     GridLayout {
                         columns: 2
+                        enabled: statusBackend.connected && backend.axisIdle
                         SpinRow { attr: "current_lim"; base: "motor"; label: "Current limit"; unit: "A"; min: 0; max: 60; decimals: 2; step: 0.1; Layout.fillWidth: true }
                         SpinRow { attr: "current_lim_margin"; base: "motor"; label: "Current limit margin"; unit: "A"; min: 0; max: 60; decimals: 2; step: 0.1; Layout.fillWidth: true }
                         SpinRow { attr: "requested_current_range"; base: "motor"; label: "Requested current range"; unit: "A"; min: 0; max: 60; decimals: 1; step: 0.5; Layout.fillWidth: true
@@ -178,9 +181,10 @@ ApplicationWindow {
                         SpinRow { attr: "dc_max_negative_current"; base: "odrive"; label: "DC -ve current limit (regen)"; unit: "A"; min: -60; max: 0; decimals: 2; step: 0.1; Layout.fillWidth: true }
                     }
 
-                    // Mechanical Limits
+                    // Mechanical Limits — whole tab disabled while the axis runs (§2.4)
                     GridLayout {
                         columns: 2
+                        enabled: statusBackend.connected && backend.axisIdle
                         SpinRow { attr: "vel_limit"; base: "controller"; label: "Velocity limit"; unit: "turn/s"; min: 0; max: 200; decimals: 1; step: 0.5; Layout.fillWidth: true }
                         SpinRow { attr: "torque_lim"; base: "motor"; label: "Torque limit"; unit: "N·m"; min: 0; max: 50; decimals: 3; step: 0.1; Layout.fillWidth: true }
                         CheckRow { attr: "enable_vel_limit"; base: "controller"; label: "Enable velocity limit"; Layout.fillWidth: true }
@@ -207,4 +211,5 @@ ApplicationWindow {
     ErrorDialog { id: errorDialog; objectName: "errorDialog" }
     EventLogDialog { id: eventLogDialog; objectName: "eventLogDialog" }
     DeviceInfoDialog { id: deviceInfoDialog; objectName: "deviceInfoDialog" }
+    ConfigBrowserDialog { id: configBrowserDialog; objectName: "configBrowserDialog" }
 }
