@@ -204,7 +204,11 @@ def _get_exception(status):
     elif status == kFibreClosed:
         return EOFError()
     elif status == kFibreInvalidArgument:
-        return ArgumentError()
+        # Fork note (0.5.7-hardened): this status surfaces when touching an
+        # object whose C handle was destroyed -- i.e. the link is gone. It is
+        # NOT a Python marshalling error despite borrowing ctypes' class name;
+        # route it into the typed "object lost" family.
+        return ObjectLostError()
     elif status == kFibreInternalError:
         return Exception("internal libfibre error")
     elif status == kFibreProtocolError:
@@ -645,10 +649,18 @@ class RemoteAttribute(object):
             raise Exception("this attribute cannot be written to")
 
 class EmptyInterface():
+    # Fork note (0.5.7-hardened): a lost object's class is swapped to this.
+    # Instead of letting stray attribute access raise generic
+    # AttributeError/TypeError from random call sites, raise the typed
+    # "link is gone" exception so consumers catch disconnects uniformly.
     def __str__(self):
         return "[lost object]"
     def __repr__(self):
         return self.__str__()
+    def __getattr__(self, name):
+        raise ObjectLostError()
+    def __setattr__(self, name, value):
+        raise ObjectLostError()
 
 class RemoteObject(object):
     """

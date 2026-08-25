@@ -147,16 +147,32 @@ def test_device_loss_drops_link_and_schedules_one_reconnect(backend):
     assert len(hits) == 1  # a second path would double-connect
 
 
-def test_type_error_tick_drops_link_once(backend):
-    """The libfibre EmptyInterface race raises TypeError mid-teardown; both
-    poll ticks must treat it as transport failure."""
+def test_object_lost_tick_drops_link_once(backend):
+    """0.5.7-hardened: the EmptyInterface race raises ObjectLostError, which
+    must drop the link exactly once like any other device-gone signal."""
+    import fibre.libfibre as lf
     hits = []
     backend.connectOdrive = lambda: hits.append(1)
 
-    def boom():
-        raise TypeError("Expected RemoteObject but got 'EmptyInterface'")
+    def gone():
+        raise lf.ObjectLostError()
 
-    backend._sample_plot = boom
+    backend._sample_plot = gone
     backend.plotTick()
     assert backend.odrive is None and len(hits) == 1
     backend.plotTick()  # offline now: must early-return silently
+
+
+def test_unexpected_error_surfaces_and_keeps_link(backend):
+    """Post-hardening, AttributeError/TypeError are no longer disconnect
+    signals -- they are bugs or missing endpoints and must surface instead of
+    being conflated into a reconnect."""
+    import pytest
+
+    def buggy():
+        raise TypeError("genuine bug")
+
+    backend._sample_plot = buggy
+    with pytest.raises(TypeError):
+        backend.plotTick()
+    assert backend.odrive is not None  # link stays up

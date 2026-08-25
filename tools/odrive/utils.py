@@ -186,7 +186,7 @@ def start_liveplotter(get_var_callback):
     fetch_t = threading.Thread(target=fetch_data)
     fetch_t.daemon = True
     fetch_t.start()
-    
+
     plot_t = threading.Thread(target=plot_data)
     plot_t.daemon = True
     plot_t.start()
@@ -243,7 +243,7 @@ class BulkCapture:
                 print("If this rate is significantly lower than what you specified, consider lowering it below the achieved value for more consistent sampling.")
             self.event.set() # tell the main thread that the bulk capture is complete
         Thread(target=loop, daemon=True).start()
-    
+
     def plot(self):
         import matplotlib.pyplot as plt
         import inspect
@@ -263,7 +263,7 @@ def step_and_plot(  axis,
                     settle_time=0.5,
                     data_rate=500.0,
                     ctrl_mode=CONTROL_MODE_POSITION_CONTROL):
-    
+
     if ctrl_mode is CONTROL_MODE_POSITION_CONTROL:
         get_var_callback = lambda :[axis.encoder.pos_estimate, axis.controller.pos_setpoint]
         initial_setpoint = axis.encoder.pos_estimate
@@ -277,13 +277,13 @@ def step_and_plot(  axis,
     else:
         print("Invalid control mode")
         return
-    
+
     initial_settle_time = 0.5
     initial_control_mode = axis.controller.config.control_mode # Set it back afterwards
     print(initial_control_mode)
     axis.controller.config.control_mode = ctrl_mode
     axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
-    
+
     capture = BulkCapture(get_var_callback,
                           data_rate=data_rate,
                           duration=initial_settle_time + settle_time)
@@ -325,27 +325,28 @@ def show_oscilloscope(odrv):
     plt.plot(values)
     plt.show()
 
-def rate_test(device):
+def rate_test(device, count=10000, mode='sequential'):
     """
-    Tests how many integers per second can be transmitted
+    Fork note (0.5.7-hardened): signature and output aligned with the 0.6
+    tooling so consumers keep the same call across stacks. Only mode
+    'sequential' exists on this stack -- 'pipelined'/'batch' need 0.6's async
+    transport. Measures n_evt_control_loop read throughput.
     """
+    if mode != 'sequential':
+        raise Exception(f"mode {mode!r} requires the 0.6 tooling")
 
-    # import matplotlib.pyplot as plt
-    # plt.ion()
-
-    print("reading 10000 values...")
-    numFrames = 10000
+    print(f"reading {count} values...")
+    start_time = time.monotonic()
     vals = []
-    for _ in range(numFrames):
+    for _ in range(count):
         vals.append(device.n_evt_control_loop)
+    duration = time.monotonic() - start_time
 
-    loopsPerFrame = (vals[-1] - vals[0])/numFrames
-    loopsPerSec = (168000000/(6*3500))
-    FramePerSec = loopsPerSec/loopsPerFrame
-    print("Frames per second: " + str(FramePerSec))
-
-    # plt.plot(vals)
-    # plt.show(block=True)
+    loopsPerFrame = (vals[-1] - vals[0]) / count
+    loopsPerSec = (168000000 / (6 * 3500))
+    FramePerSec = loopsPerSec / loopsPerFrame
+    print(f"{mode} read of {count} values took {duration:.3f} s "
+          f"({count / duration:.1f} values/s, {FramePerSec:.1f} frames/s)")
 
 def usb_burn_in_test(get_var_callback, cancellation_token):
     """
@@ -592,9 +593,9 @@ def dump_timing(odrv, n_samples=100, path='/tmp/timings.png'):
     import matplotlib.pyplot as plt
     import re
     import numpy as np
-    
+
     timings = []
-    
+
     for attr in dir(odrv.task_times):
         if not attr.startswith('_'):
             timings.append((attr, getattr(odrv.task_times, attr), [], [])) # (name, obj, start_times, lengths)

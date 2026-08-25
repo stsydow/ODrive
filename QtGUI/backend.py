@@ -37,7 +37,7 @@ from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from configtree import ConfigTreeModel
-from errors import DEVICE_EXCEPTIONS, TRANSPORT_ERRORS
+from errors import DEVICE_EXCEPTIONS
 from eventlog import LogEntry, format_log
 from monitoring import PlotWindow, SampleBuffer
 from status_backend import STATE_MAP, StatusBackend
@@ -158,6 +158,7 @@ class GuiBackend(QObject):
     def __init__(self, verbose=False):
         super().__init__()
         self.odrive = None  # single source of truth; sub-objects derived per use
+        self._target_serial = None  # reconnects target this device once known
         self.status_backend = StatusBackend(self)
         self._connecting = False
         self._last_synced_mode = None
@@ -264,7 +265,9 @@ class GuiBackend(QObject):
 
     def _connect_worker(self):
         try:
-            odrv = odrive.find_any()
+            # 0.5.7-hardened: once a serial is known, reconnects target that
+            # exact device instead of silently adopting whichever ODrive shows up.
+            odrv = odrive.find_any(serial_number=self._target_serial)
         except DEVICE_EXCEPTIONS as e:
             msg = str(e)
             QTimer.singleShot(0, self, lambda: self._on_connect_failed(msg))
@@ -274,6 +277,13 @@ class GuiBackend(QObject):
     def _on_connected(self, odrv):
         self.odrive = odrv
         self._connecting = False
+
+        # 0.5.7-hardened: remember this device; reconnects target it by serial.
+        try:
+            self._target_serial = odrive.get_serial_number_str_sync(odrv)
+        except DEVICE_EXCEPTIONS:
+            pass  # stay untargeted; any-device reconnect is the fallback
+
         try:
             if self.odrive._on_lost.done():
                 logger.warning("on_connected: device already lost during setup, reconnecting")
@@ -535,7 +545,7 @@ class GuiBackend(QObject):
         axis = self._axis()
         try:
             idle = axis is not None and axis.current_state == AXIS_STATE_IDLE
-        except TRANSPORT_ERRORS:
+        except DEVICE_EXCEPTIONS:
             idle = False
         if not idle:
             self.logEvent("WRITE", f"refused {label} (axis not IDLE)")
@@ -670,11 +680,11 @@ class GuiBackend(QObject):
             QMessageBox.Yes | QMessageBox.No)
         if reply != QMessageBox.Yes:
             return
-        if not hasattr(self.odrive, "reboot"):
-            QMessageBox.critical(None, "Reboot Error",
-                                 "This firmware does not expose a reboot command.")
-            return
         try:
+            if not hasattr(self.odrive, "reboot"):
+                QMessageBox.critical(None, "Reboot Error",
+                                     "This firmware does not expose a reboot command.")
+                return
             self.status_backend.set_conn("\u25cf Rebooting\u2026", "orange", False)
             self.odrive.reboot()
             self.logEvent("CFG", "device rebooting")
@@ -757,9 +767,8 @@ class GuiBackend(QObject):
     def updateReadings(self):
         """Single guarded poll: every display read happens here.
 
-        Any transport failure (or the lost-object race) drops the link and
-        auto-reconnects, so nothing below this method needs its own handling
-        for device reads.
+        Any transport failure drops the link and auto-reconnects, so nothing
+        below this method needs its own handling for device reads.
         """
         if self.odrive is None:
             return
@@ -769,13 +778,11 @@ class GuiBackend(QObject):
             if self.status_backend.update_readings(self.odrive, self._axis(), self.logEvent):
                 self.errorsChanged.emit()
             self._read_estimates()
-        except TRANSPORT_ERRORS as e:
-            # AttributeError/TypeError: while fibre destroys a lost object its
-            # class is swapped to EmptyInterface mid-flight, so late accesses
-            # raise AttributeError or a libfibre TypeError rather than
-            # ObjectLostError (see LibFibre._release_py_obj).
-            # ponytail: any transport hiccup drops the link and reconnects;
-            # widen to an N-strike counter here if USB proves flaky.
+        except DEVICE_EXCEPTIONS as e:
+            # 0.5.7-hardened: all "link gone" paths raise ObjectLostError, so
+            # this catch is uniform. AttributeError/TypeError here would be a
+            # bug or a missing endpoint and deliberately surfaces.
+            # ponytail: widen to an N-strike counter if USB proves flaky.
             self._drop_link("updateReadings", e)
 
     def plotTick(self):
@@ -784,7 +791,7 @@ class GuiBackend(QObject):
             return
         try:
             self._sample_plot()
-        except TRANSPORT_ERRORS as e:
+        except DEVICE_EXCEPTIONS as e:
             self._drop_link("plotTick", e)
 
     def _drop_link(self, where, exc):
@@ -794,6 +801,8 @@ class GuiBackend(QObject):
         the cause, and at plot tick rate this fires within milliseconds of
         any disconnect — a stack trace per disconnect is pure noise.
         """
+        if self.odrive is None:
+            return  # already dropped by an earlier site in this unwind
         logger.warning("%s: read failed (%s: %s), reconnecting", where,
                        type(exc).__name__, exc)
         self.status_backend.set_conn("\u25cf Offline", "gray", False)

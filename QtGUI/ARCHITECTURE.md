@@ -143,7 +143,7 @@ since the firmware enforces real safety; only the browser's long-lived editor ne
 commit-time re-check.
 
 # ponytail: the browser's EXPANSION walk reads scalar values too (~40 reads/expansion);
-cheap at the measured ~3.8 kHz link rate. The filter scan is already name-only (see above).
+cheap at the measured ~4 kHz sequential link rate (`bench_poll_rate.py`, Plan §3.4 Step 0). The filter scan is already name-only (see above).
 
 ## Key Design Decisions
 

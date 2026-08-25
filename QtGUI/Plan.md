@@ -320,9 +320,11 @@ CSV export reuses `SampleBuffer.csv()` (header = channel labels).
 One-shot capture-and-plot, beside the live plot (not replacing it): click Record, capture for an interval, plot the recording. Two stages plus a measurement step:
 
 **Step 0 — poll-rate benchmark** (`tools/bench_poll_rate.py`, CLI against real hardware) ✅ DONE:
-reads the position estimate 4000 times with timestamps, prints sustained sample rate and inter-sample gap jitter. Decision bar: ≥100 Hz × 3 channels = useful, ~200 Hz × 4 channels = good — measured single-channel rate is an upper bound, so divide it by 3–4 for per-channel rate before judging.
+reads `odrv.n_evt_control_loop` (firmware-global control-loop tick counter) 4000 times with timestamps; prints sustained sample rate, inter-sample gap jitter, ticks-per-read distribution, and the dt↔dtick correlation. The counter doubles as an internal clock reference: its delta over the run gives the true loop frequency, so reads/loop is measured directly rather than inferred.
 
-**Measured (real hardware):** 3768 Hz single-channel (`axis0.encoder.pos_estimate`), gap jitter 0.25 ms median / 0.51 ms p99 ⇒ per-channel ceiling ~940 Hz × 4 ch. Bar cleared by ~5×; Stage A is viable at 500–1000 Hz × 4 channels.
+Decision bar: ≥100 Hz × 3 channels = useful, ~200 Hz × 4 channels = good — measured single-channel rate is an upper bound, so divide it by 3–4 for per-channel rate before judging.
+
+**Measured (real hardware, idle host):** ~3900–4340 Hz single-channel (`n_evt_control_loop`), Δt 0.24 ms median / ~0.36 ms p95 / max ≤ 0.8 ms across consecutive runs. Loop frequency confirmed at **8000–8002 Hz** via the counter (matches 168 MHz/(6·3500)). dt↔dtick correlation is a sensitive host-load indicator: **~0.80 stable on an idle machine**; transient background load both inflates Δt-max (seen: 3.3 ms / 28 ticks) and drags corr down to 0.2–0.5. Ticks/transfer ≈ 0.5 ⇒ sequential polling sees only half of all loop ticks (bursts up to ~15 unobserved under load) — polling is fine for Stage A's display needs, and this quantifies why Stage B needs subscriptions instead.
 
 **Stage A — interim GUI recorder** (conditional on Step 0 meeting the bar):
 - Channel checkboxes generated from the `monitoring.CHANNELS` registry (same readers as §3.1).
@@ -334,6 +336,8 @@ reads the position estimate 4000 times with timestamps, prints sustained sample 
 **Stage B — firmware oscilloscope extension** (kept, not scheduled): the firmware's built-in `oscilloscope` object samples at the **control-loop rate, 8 kHz** (TIM1/8 @ 168 MHz, `PERIOD_CLOCKS=3500`, `RCR=2` ⇒ `CURRENT_MEAS_HZ = 8000`; `oscilloscope_.update()` runs inside `control_loop_cb()`, loop-synchronous with current sampling). Its 4096-sample buffer gives **T_max ≈ 0.51 s per recording**. Currently dead code: `trigger_src`/`data_src` are hardwired to `nullptr` at compile time (`Firmware/MotorControl/odrive_main.h`). Wiring 4–8 real endpoints in is a separate self-contained firmware change (like the friction-compensation work in Phase 4).
 
 Complementary to Stage A rather than competing: Stage B's value is capturing **one loop-internal signal at full 8 kHz resolution** over half a second (e.g. `Iq_setpoint` vs `Iq_measured`) — what §4.3 step-response tuning will want. For multi-channel noise/lag surveys, Stage A wins on channels × duration; GUI reads can't see inside the control loop either way.
+
+**Design reference:** the odrive tooling **0.6.11** implements exactly this pattern natively — `odrive/high_rate_capturer.py` (vendored copy on branch `odrive-0.6.11-vendored`): subscription-based ring buffers at control-loop rate with cycle-count/nanosecond timestamps and a configurable trigger point, riding on `libodrive`. Use it as the blueprint for Stage B — or as the ready-made implementation if/when the stack moves to 0.6 tooling (the 0.5.6 libfibre has no subscription API to backport it to).
 
 ### Phase 4: Torque Drive + Calibration + Dynamics (NEXT ⬜)
 

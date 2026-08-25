@@ -17,7 +17,7 @@ drop the link exactly like the poll does (Plan §4.1).
 
 from PySide6.QtCore import QAbstractItemModel, QModelIndex, Qt, Slot
 
-from errors import LINK_FAILURES
+from errors import DEVICE_EXCEPTIONS
 
 try:
     from fibre.libfibre import RemoteAttribute
@@ -86,7 +86,7 @@ class ConfigTreeModel(QAbstractItemModel):
     def _public_names(self, obj):
         try:
             return sorted(n for n in dir(obj) if not n.startswith("_"))
-        except LINK_FAILURES as e:
+        except DEVICE_EXCEPTIONS as e:
             self._backend._drop_link("configBrowser", e)
             return []
         except (AttributeError, TypeError):
@@ -102,7 +102,7 @@ class ConfigTreeModel(QAbstractItemModel):
         for name in self._public_names(node.obj):
             try:
                 value = getattr(node.obj, name)
-            except LINK_FAILURES as e:
+            except DEVICE_EXCEPTIONS as e:
                 self._backend._drop_link("configBrowser", e)
                 return  # stop the walk; link is down, reconnect pending
             except (AttributeError, TypeError):
@@ -158,7 +158,7 @@ class ConfigTreeModel(QAbstractItemModel):
             return None  # scalar: name already match-checked above
         try:
             v = getattr(obj, name)
-        except LINK_FAILURES as e:
+        except DEVICE_EXCEPTIONS as e:
             self._backend._drop_link("configBrowser", e)
             return None
         except (AttributeError, TypeError):
@@ -265,7 +265,7 @@ class ConfigTreeModel(QAbstractItemModel):
             for part in parts[:-1]:
                 obj = getattr(obj, part)
             cur = getattr(obj, parts[-1])
-        except LINK_FAILURES as e:
+        except DEVICE_EXCEPTIONS as e:
             self._backend._drop_link("configBrowser", e)
             return None
         except (AttributeError, TypeError):

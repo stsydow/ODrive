@@ -1,47 +1,60 @@
 #!/usr/bin/env python3
-"""Poll-rate benchmark for the oscilloscope recorder (Plan.md §3.4 Step 0).
+"""
+USB poll-rate / jitter benchmark against the control-loop tick counter.
 
-Reads axis0.encoder.pos_estimate N times with timestamps and prints sustained
-sample rate and inter-sample gap jitter.
+Reads odrv.n_evt_control_loop N times; the counter delta gives the true loop
+frequency and ticks-per-transfer, so wall-clock jitter can be judged against
+loop time directly.
 
-Decision bar (Plan §3.4): >=100 Hz x 3 channels useful, ~200 Hz x 4 ch good.
-Single-channel rate is the ceiling; per-channel cost scales roughly linearly.
-
-Usage: python bench_poll_rate.py [n_reads]
+Usage: bench_poll_rate.py [n]
 """
 
-import statistics
 import sys
 import time
-from itertools import pairwise
 
+import numpy as np
 import odrive
 
 
 def main():
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 4000
+
     print("connecting...")
     odrv = odrive.find_any()
-    print(f"reading axis0.encoder.pos_estimate {n} times...")
 
-    stamps = []
-    for _ in range(n):
-        _v = odrv.axis0.encoder.pos_estimate  # full path each time: one USB read per access
-        stamps.append(time.perf_counter())
+    # warmup
+    _dummy = odrv.n_evt_control_loop
 
-    gaps = [b - a for a, b in pairwise(stamps)]
-    span = stamps[-1] - stamps[0]
-    rate = (len(stamps) - 1) / span
-    med = statistics.median(gaps)
-    print(f"\nsamples      : {len(stamps)}")
-    print(f"span         : {span:.3f} s")
-    print(f"rate         : {rate:.1f} Hz")
-    print(f"gap median   : {med * 1000:.2f} ms")
-    print(f"gap min/max  : {min(gaps) * 1000:.2f} / {max(gaps) * 1000:.2f} ms")
-    print(f"gap p95/p99  : {statistics.quantiles(gaps, n=20)[18] * 1000:.2f} / "
-          f"{statistics.quantiles(gaps, n=100)[98] * 1000:.2f} ms")
-    verdict = ("OK" if rate >= 200 else "MARGINAL" if rate >= 100 else "TOO SLOW")
-    print(f"bar (>=200 Hz nice, >=100 Hz useful): {verdict}")
+    samples = np.empty([2, n], dtype=np.int64)
+    for i in range(n):
+        tick = odrv.n_evt_control_loop
+        samples[0, i] = time.perf_counter_ns()
+        samples[1, i] = tick
+
+    time_span = 1e-9 * (samples[0, -1] - samples[0, 0])
+    tick_span = samples[1, -1] - samples[1, 0]
+
+    if n < 2 or tick_span < 2 or time_span <= 1e-6:
+        sys.exit(f"interval too small: {tick_span} ticks / {time_span:.4f} s")
+
+    transfer_rate = (n - 1) / time_span
+    clock_rate = tick_span / time_span
+
+    dsample = np.diff(samples)  # rows: [0] = Δt in ns, [1] = Δticks
+
+    corr = np.corrcoef(dsample)[0, 1]  # rows are the variables → corr(Δt, Δtick)
+    perc = np.percentile(dsample, [0, 5, 50, 95, 100], axis=1) * [1e-6, 1]
+    # perc: [5 percentiles, 2 vars], col 0 converted ns→ms; order: min, p5, median, p95, max
+    p_dt_ms, p_dtick = perc[:, 0], perc[:, 1]
+
+    print(f"\nspan:  {time_span:.3f} s / {tick_span} ticks / {n} samples")
+    print(f"rate:  transfer {transfer_rate:.1f} Hz  / clock {clock_rate:.1f} Hz")
+    print(
+        f"\u0394t:       median {p_dt_ms[2]:.3f} ms "
+        f"(min: {p_dt_ms[0]:.3f} / p5: {p_dt_ms[1]:.3f} / p95: {p_dt_ms[3]:.3f} / max: {p_dt_ms[4]:.3f})"
+    )
+    print(f"\u0394clock:  median {p_dtick[2]:.0f} ticks (min: {p_dtick[0]:.0f} / max: {p_dtick[4]:.0f})")
+    print(f"corr(\u0394t,\u0394clock): {corr:.3f}")
 
 
 if __name__ == "__main__":
