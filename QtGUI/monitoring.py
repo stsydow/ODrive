@@ -60,7 +60,7 @@ CHANNELS = [
 SAMPLE_INTERVAL_MS = 5  # plot sampling 200 Hz
 BUFFER_SECONDS = 60.0  # retention == widest selectable plot window
 
-_WINDOW_CHOICES = [("5 s", 5.0), ("10 s", 10.0), ("30 s", 30.0), ("60 s", 60.0)]
+PLOT_INTERVAL_CHOICES = [5, 10, 30, 60]
 
 
 class SampleBuffer:
@@ -117,7 +117,7 @@ class PlotWindow(QWidget):
 
         bar = QHBoxLayout()
         combo = QComboBox()
-        combo.addItems([label for label, *_ in _WINDOW_CHOICES])
+        combo.addItems([f"{interval} s" for interval in PLOT_INTERVAL_CHOICES])
         combo.setCurrentIndex(2)
         combo.currentIndexChanged.connect(self._on_window_changed)
         self._pause_btn = QPushButton("Pause")
@@ -231,7 +231,7 @@ class PlotWindow(QWidget):
         self.refresh()
 
     def _on_window_changed(self, idx: int) -> None:
-        self.window_seconds = _WINDOW_CHOICES[idx][1]
+        self.window_seconds = PLOT_INTERVAL_CHOICES[idx]
         self.refresh()
 
     def _on_paused(self, checked: bool) -> None:
