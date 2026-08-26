@@ -39,12 +39,13 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from configtree import ConfigTreeModel
 from errors import DEVICE_EXCEPTIONS
 from eventlog import LogEntry, format_log
-from monitoring import PlotWindow, SampleBuffer
+from monitoring import SAMPLE_INTERVAL_MS, PlotWindow, SampleBuffer
 from status_backend import STATE_MAP, StatusBackend
 
 logger = logging.getLogger(__name__)
 
 RECONNECT_RETRY_DELAY_MS = 1000
+UI_UPDATE_INTERVAL_MS = 100  # ms -> 10Hz
 
 # Control mode <-> display name (order defines the mode-combo index).
 MODE_NAMES = {
@@ -52,9 +53,11 @@ MODE_NAMES = {
     CONTROL_MODE_POSITION_CONTROL: "Position",
     CONTROL_MODE_TORQUE_CONTROL: "Torque",
 }
-_MODE_ORDER = (CONTROL_MODE_VELOCITY_CONTROL,
-               CONTROL_MODE_POSITION_CONTROL,
-               CONTROL_MODE_TORQUE_CONTROL)
+_MODE_ORDER = (
+    CONTROL_MODE_VELOCITY_CONTROL,
+    CONTROL_MODE_POSITION_CONTROL,
+    CONTROL_MODE_TORQUE_CONTROL,
+)
 MODE_VALUES = {name: value for value, name in MODE_NAMES.items()}
 
 # Setpoint endpoint + display label per control mode (order irrelevant).
@@ -63,8 +66,6 @@ _SETPOINT_TARGETS = {
     CONTROL_MODE_TORQUE_CONTROL: ("input_torque", "Torque"),
     CONTROL_MODE_POSITION_CONTROL: ("input_pos", "Position"),
 }
-
-
 
 
 def _f(obj, attr):
@@ -84,8 +85,6 @@ def _pos_reader(axis, _odrv):
     if v is None:
         v = getattr(enc, "pos_estimate", None)
     return float(v) if v is not None else math.nan
-
-
 
 
 def _iq_reader(axis, _odrv):
@@ -130,7 +129,11 @@ INPUT_MODES = {
 }
 MODES_BY_CONTROL = {
     CONTROL_MODE_VELOCITY_CONTROL: [INPUT_MODE_VEL_RAMP, INPUT_MODE_PASSTHROUGH],
-    CONTROL_MODE_POSITION_CONTROL: [INPUT_MODE_POS_FILTER, INPUT_MODE_TRAP_TRAJ, INPUT_MODE_PASSTHROUGH],
+    CONTROL_MODE_POSITION_CONTROL: [
+        INPUT_MODE_POS_FILTER,
+        INPUT_MODE_TRAP_TRAJ,
+        INPUT_MODE_PASSTHROUGH,
+    ],
     CONTROL_MODE_TORQUE_CONTROL: [INPUT_MODE_TORQUE_RAMP, INPUT_MODE_PASSTHROUGH],
 }
 DEFAULT_BY_CONTROL = {
@@ -141,18 +144,19 @@ DEFAULT_BY_CONTROL = {
 
 # Axis states selectable from the "Program" dropdown (label -> value).
 
+
 class GuiBackend(QObject):
     """All device logic, exposed to QML."""
 
     # -- QML-facing signals --------------------------------------------
-    estimatesChanged = Signal()       # velEstimateText / posEstimateText
-    closedLoopChanged = Signal()      # closedLoop
-    modeChanged = Signal()            # currentMode
+    estimatesChanged = Signal()  # velEstimateText / posEstimateText
+    closedLoopChanged = Signal()  # closedLoop
+    modeChanged = Signal()  # currentMode
     inputModeModelChanged = Signal()  # inputModes / currentInputMode
-    setpointChanged = Signal()        # vel/torque/pos setpoints
-    verboseChanged = Signal()         # verbose
-    idleChanged = Signal()            # axisIdle
-    logUpdated = Signal()             # a LogEntry was appended
+    setpointChanged = Signal()  # vel/torque/pos setpoints
+    verboseChanged = Signal()  # verbose
+    idleChanged = Signal()  # axisIdle
+    logUpdated = Signal()  # a LogEntry was appended
     errorsChanged = Signal()
 
     def __init__(self, verbose=False):
@@ -183,13 +187,12 @@ class GuiBackend(QObject):
 
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.updateReadings)
-        self.update_timer.start(100)
+        self.update_timer.start(UI_UPDATE_INTERVAL_MS)
 
-        # Plot sampling at 100 Hz on its own tick (Plan §3.4 Step 0 benchmark:
-        # ~940 Hz x 4 ch ceiling); the status/footer poll stays at 10 Hz.
+        # Plot sampling at on its own tick:
         self.plot_timer = QTimer()
         self.plot_timer.timeout.connect(self.plotTick)
-        self.plot_timer.start(10)
+        self.plot_timer.start(SAMPLE_INTERVAL_MS)
 
         QTimer.singleShot(500, self.connectOdrive)
 
@@ -286,7 +289,9 @@ class GuiBackend(QObject):
 
         try:
             if self.odrive._on_lost.done():
-                logger.warning("on_connected: device already lost during setup, reconnecting")
+                logger.warning(
+                    "on_connected: device already lost during setup, reconnecting"
+                )
                 QTimer.singleShot(0, self.connectOdrive)
                 return
             self.odrive._on_lost.add_done_callback(self._on_device_lost)
@@ -302,8 +307,10 @@ class GuiBackend(QObject):
         logger.info("Connected to ODrive")
 
     def _on_device_lost(self, _future):
-        logger.warning("on_device_lost: connection lost (thread=%s)",
-                       threading.current_thread().name)
+        logger.warning(
+            "on_device_lost: connection lost (thread=%s)",
+            threading.current_thread().name,
+        )
         # Drop immediately so poll ticks stop hitting the dead object
         # (the reconnect itself must run on the Qt thread).
         self.odrive = None
@@ -312,7 +319,9 @@ class GuiBackend(QObject):
 
     def _on_connect_failed(self, msg):
         self._connecting = False
-        logger.warning("on_connect_failed: %s (retry in %d ms)", msg, RECONNECT_RETRY_DELAY_MS)
+        logger.warning(
+            "on_connect_failed: %s (retry in %d ms)", msg, RECONNECT_RETRY_DELAY_MS
+        )
         self.status_backend.set_conn("\u25cf Offline (retrying)", "red", False)
         QTimer.singleShot(RECONNECT_RETRY_DELAY_MS, self.connectOdrive)
 
@@ -396,8 +405,10 @@ class GuiBackend(QObject):
             default = DEFAULT_BY_CONTROL.get(control_mode, allowed[0])
             try:
                 controller.config.input_mode = default
-                self.logEvent("MODE", f"input mode -> {INPUT_MODES[default]} "
-                                      f"(default for {MODE_NAMES[control_mode]})")
+                self.logEvent(
+                    "MODE",
+                    f"input mode -> {INPUT_MODES[default]} (default for {MODE_NAMES[control_mode]})",
+                )
             except DEVICE_EXCEPTIONS as e:
                 logger.warning("failed to default input_mode: %s", e)
 
@@ -433,12 +444,27 @@ class GuiBackend(QObject):
         controller = axis.controller
         try:
             mode = controller.config.control_mode
-            if mode == CONTROL_MODE_VELOCITY_CONTROL and controller.input_vel is not None:
-                self._setpoints[CONTROL_MODE_VELOCITY_CONTROL] = float(controller.input_vel)
-            elif mode == CONTROL_MODE_TORQUE_CONTROL and controller.input_torque is not None:
-                self._setpoints[CONTROL_MODE_TORQUE_CONTROL] = float(controller.input_torque)
-            elif mode == CONTROL_MODE_POSITION_CONTROL and controller.input_pos is not None:
-                self._setpoints[CONTROL_MODE_POSITION_CONTROL] = float(controller.input_pos)
+            if (
+                mode == CONTROL_MODE_VELOCITY_CONTROL
+                and controller.input_vel is not None
+            ):
+                self._setpoints[CONTROL_MODE_VELOCITY_CONTROL] = float(
+                    controller.input_vel
+                )
+            elif (
+                mode == CONTROL_MODE_TORQUE_CONTROL
+                and controller.input_torque is not None
+            ):
+                self._setpoints[CONTROL_MODE_TORQUE_CONTROL] = float(
+                    controller.input_torque
+                )
+            elif (
+                mode == CONTROL_MODE_POSITION_CONTROL
+                and controller.input_pos is not None
+            ):
+                self._setpoints[CONTROL_MODE_POSITION_CONTROL] = float(
+                    controller.input_pos
+                )
         except DEVICE_EXCEPTIONS as e:
             logger.debug("sync setpoint failed: %s", e)
             return
@@ -506,12 +532,13 @@ class GuiBackend(QObject):
 
     def _sync_closed_loop(self):
         axis = self._axis()
-        running = (axis is not None
-                   and axis.current_state == AXIS_STATE_CLOSED_LOOP_CONTROL)
+        running = (
+            axis is not None and axis.current_state == AXIS_STATE_CLOSED_LOOP_CONTROL
+        )
         if running != self._closed_loop:
             self._closed_loop = running
             self.closedLoopChanged.emit()
-        idle = (axis is not None and axis.current_state == AXIS_STATE_IDLE)
+        idle = axis is not None and axis.current_state == AXIS_STATE_IDLE
         if idle != self._axis_idle:
             self._axis_idle = idle
             self.idleChanged.emit()  # drives the limits tabs' disabled state
@@ -612,7 +639,9 @@ class GuiBackend(QObject):
         try:
             value = self._parse_like(text, cur)
         except ValueError:
-            self.logEvent("WRITE", f"refused {path}: '{text}' is not {type(cur).__name__}")
+            self.logEvent(
+                "WRITE", f"refused {path}: '{text}' is not {type(cur).__name__}"
+            )
             return False
         if not self._ensure_idle_for_write(path):
             return False
@@ -635,55 +664,71 @@ class GuiBackend(QObject):
             self.odrive.save_configuration()
             self.logEvent("CFG", "saved config to NVM")
         except DEVICE_EXCEPTIONS as e:
-            QMessageBox.critical(None, "Save Error", f"Failed to save configuration: {e}")
+            QMessageBox.critical(
+                None, "Save Error", f"Failed to save configuration: {e}"
+            )
 
     @Slot()
     def exportConfig(self):
         if self.odrive is None:
             return
         path, _ = QFileDialog.getSaveFileName(
-            None, "Export Configuration", "", "JSON Files (*.json);;All Files (*)")
+            None, "Export Configuration", "", "JSON Files (*.json);;All Files (*)"
+        )
         if not path:
             return
         try:
             odrive.configuration.backup_config(self.odrive, path, logger)
             self.logEvent("CFG", f"exported config to {path}")
         except DEVICE_EXCEPTIONS as e:
-            QMessageBox.critical(None, "Export Error", f"Failed to export configuration: {e}")
+            QMessageBox.critical(
+                None, "Export Error", f"Failed to export configuration: {e}"
+            )
 
     @Slot()
     def importConfig(self):
         if self.odrive is None:
             return
         path, _ = QFileDialog.getOpenFileName(
-            None, "Import Configuration", "", "JSON Files (*.json);;All Files (*)")
+            None, "Import Configuration", "", "JSON Files (*.json);;All Files (*)"
+        )
         if not path:
             return
         reply = QMessageBox.question(
-            None, "Confirm Import",
+            None,
+            "Confirm Import",
             "Importing will overwrite the device configuration and reboot. Continue?",
-            QMessageBox.Yes | QMessageBox.No)
+            QMessageBox.Yes | QMessageBox.No,
+        )
         if reply != QMessageBox.Yes:
             return
         try:
             odrive.configuration.restore_config(self.odrive, path, logger)
             self.logEvent("CFG", f"imported config from {path} (rebooting)")
         except DEVICE_EXCEPTIONS as e:
-            QMessageBox.critical(None, "Import Error", f"Failed to import configuration: {e}")
+            QMessageBox.critical(
+                None, "Import Error", f"Failed to import configuration: {e}"
+            )
 
     @Slot()
     def reboot(self):
         if self.odrive is None:
             return
         reply = QMessageBox.question(
-            None, "Confirm Reboot", "Reboot the ODrive device?",
-            QMessageBox.Yes | QMessageBox.No)
+            None,
+            "Confirm Reboot",
+            "Reboot the ODrive device?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
         if reply != QMessageBox.Yes:
             return
         try:
             if not hasattr(self.odrive, "reboot"):
-                QMessageBox.critical(None, "Reboot Error",
-                                     "This firmware does not expose a reboot command.")
+                QMessageBox.critical(
+                    None,
+                    "Reboot Error",
+                    "This firmware does not expose a reboot command.",
+                )
                 return
             self.status_backend.set_conn("\u25cf Rebooting\u2026", "orange", False)
             self.odrive.reboot()
@@ -707,11 +752,16 @@ class GuiBackend(QObject):
             return "Not connected"
         try:
             serial = odrive.get_serial_number_str_sync(self.odrive)
-            parts = (self.odrive.fw_version_major, self.odrive.fw_version_minor,
-                     self.odrive.fw_version_revision)
-            hw_major, hw_minor, hw_variant = (self.odrive.hw_version_major,
-                                              self.odrive.hw_version_minor,
-                                              self.odrive.hw_version_variant)
+            parts = (
+                self.odrive.fw_version_major,
+                self.odrive.fw_version_minor,
+                self.odrive.fw_version_revision,
+            )
+            hw_major, hw_minor, hw_variant = (
+                self.odrive.hw_version_major,
+                self.odrive.hw_version_minor,
+                self.odrive.hw_version_variant,
+            )
         except DEVICE_EXCEPTIONS:
             return "Device lost while reading info"
         fw = ".".join(str(x) for x in parts) if None not in parts else "unknown"
@@ -725,8 +775,10 @@ class GuiBackend(QObject):
     # Live content for the QML error / event-log dialogs.
     @Property(str, notify=errorsChanged)
     def errorsText(self):
-        return self.status_backend.rendered_errors or \
-            "(no current-error snapshot — device not connected)"
+        return (
+            self.status_backend.rendered_errors
+            or "(no current-error snapshot — device not connected)"
+        )
 
     @Property(str, notify=logUpdated)
     def logText(self):
@@ -745,8 +797,8 @@ class GuiBackend(QObject):
     @Slot()
     def exportLog(self):
         path, _ = QFileDialog.getSaveFileName(
-            None, "Export Log", "odrive_log.txt",
-            "Text Files (*.txt);;All Files (*)")
+            None, "Export Log", "odrive_log.txt", "Text Files (*.txt);;All Files (*)"
+        )
         if not path:
             return
         try:
@@ -775,7 +827,9 @@ class GuiBackend(QObject):
         try:
             self._sync_mode()
             self._sync_closed_loop()
-            if self.status_backend.update_readings(self.odrive, self._axis(), self.logEvent):
+            if self.status_backend.update_readings(
+                self.odrive, self._axis(), self.logEvent
+            ):
                 self.errorsChanged.emit()
             self._read_estimates()
         except DEVICE_EXCEPTIONS as e:
@@ -786,7 +840,6 @@ class GuiBackend(QObject):
             self._drop_link("updateReadings", e)
 
     def plotTick(self):
-        """100 Hz plot sampling; same failure handling as the main poll."""
         if self.odrive is None:
             return
         try:
@@ -803,8 +856,9 @@ class GuiBackend(QObject):
         """
         if self.odrive is None:
             return  # already dropped by an earlier site in this unwind
-        logger.warning("%s: read failed (%s: %s), reconnecting", where,
-                       type(exc).__name__, exc)
+        logger.warning(
+            "%s: read failed (%s: %s), reconnecting", where, type(exc).__name__, exc
+        )
         self.status_backend.set_conn("\u25cf Offline", "gray", False)
         self.odrive = None
         self.connectOdrive()
@@ -818,7 +872,9 @@ class GuiBackend(QObject):
             try:
                 self._plot_window = PlotWindow(self)
             except ImportError:
-                self.logEvent("ERROR", "pyqtgraph not installed - live plot unavailable")
+                self.logEvent(
+                    "ERROR", "pyqtgraph not installed - live plot unavailable"
+                )
                 logger.warning("live plot requested but pyqtgraph is missing")
                 return
         self._plot_window.show()
@@ -826,7 +882,7 @@ class GuiBackend(QObject):
         self._plot_window.activateWindow()
 
     def _sample_plot(self):
-        """Append one plot sample per plot tick (100 Hz); missing endpoints
+        """Append one plot sample per plot tick; missing endpoints
         become NaN. Runs regardless of the window being open, so opening the
         plot later already shows history. getattr-gated like everything else
         (AttributeError here would falsely trigger a reconnect).
@@ -836,7 +892,8 @@ class GuiBackend(QObject):
             return
         self.samples.append(
             time.time(),
-            {key: read(axis, self.odrive) for key, read in _PLOT_READERS.items()})
+            {key: read(axis, self.odrive) for key, read in _PLOT_READERS.items()},
+        )
 
     def _read_estimates(self):
         axis = self._axis()

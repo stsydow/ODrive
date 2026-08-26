@@ -15,7 +15,14 @@ from odrive.enums import CONTROL_MODE_POSITION_CONTROL as _MODE_POS
 from odrive.enums import CONTROL_MODE_TORQUE_CONTROL as _MODE_TQ
 from odrive.enums import CONTROL_MODE_VELOCITY_CONTROL as _MODE_VEL
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QHBoxLayout,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 # Quantity rows: (group id, title, unit) — subplot order top to bottom.
 _GROUPS = [
@@ -48,8 +55,10 @@ CHANNELS = [
     ("vbus", "Bus voltage", False, "voltage", None),
 ]
 
-SAMPLE_INTERVAL_S = 0.01  # plot sampling rate (benchmark §3.4: ≥500 Hz feasible)
-BUFFER_SECONDS = 60.0     # retention == widest selectable plot window
+# ~4000 Hz USB transfer ceiling; keep 1/4 as margin
+# SAMPLE_INTERVAL_MS = 1000ms / ( 4000Hz * 3/4 / channel_max); channel_max=15
+SAMPLE_INTERVAL_MS = 5  # plot sampling 200 Hz
+BUFFER_SECONDS = 60.0  # retention == widest selectable plot window
 
 _WINDOW_CHOICES = [("5 s", 5.0), ("10 s", 10.0), ("30 s", 30.0), ("60 s", 60.0)]
 
@@ -62,8 +71,9 @@ class SampleBuffer:
     """
 
     def __init__(self, seconds: float = BUFFER_SECONDS) -> None:
-        self.rows: collections.deque[tuple[float, dict[str, float]]] = \
-            collections.deque(maxlen=int(seconds / SAMPLE_INTERVAL_S))
+        self.rows: collections.deque[tuple[float, dict[str, float]]] = (
+            collections.deque(maxlen=int(seconds * 1000 / SAMPLE_INTERVAL_MS))
+        )
 
     def append(self, t: float, values: dict[str, float]) -> None:
         self.rows.append((t, values))
@@ -83,8 +93,7 @@ class SampleBuffer:
         """Whole retained buffer as CSV lines (header included)."""
         yield "time," + ",".join(label for _, label, *_ in CHANNELS)
         for t, vals in self.rows:
-            fields = ",".join(f"{vals.get(key, math.nan):.5g}"
-                              for key, *_ in CHANNELS)
+            fields = ",".join(f"{vals.get(key, math.nan):.5g}" for key, *_ in CHANNELS)
             yield f"{t:.3f},{fields}"
 
 
@@ -97,7 +106,7 @@ class PlotWindow(QWidget):
 
     def __init__(self, backend) -> None:
         super().__init__()
-        # ponytail: full redraw of ≤6000 points per curve at 25 Hz instead of
+        # do full redraw of the graph at 25 Hz instead of
         # incremental append — fast enough by orders of magnitude; switch only
         # if profiling ever says otherwise.
         self._backend = backend
@@ -151,12 +160,14 @@ class PlotWindow(QWidget):
         # A row with no active curve is hidden entirely (_update_rows).
         channel_box = QHBoxLayout()
         group_curves: dict[str, list[tuple[str, pg.PlotDataItem]]] = {
-            gid: [] for gid, *_ in _GROUPS}
+            gid: [] for gid, *_ in _GROUPS
+        }
         self._boxes: dict[str, QCheckBox] = {}
         self._curve_mode: dict[str, int | None] = {}
         for i, (key, label, default_on, group, mode) in enumerate(CHANNELS):
-            curve = self._plots[group].plot(pen=pg.intColor(i, len(CHANNELS)),
-                                            name=label)
+            curve = self._plots[group].plot(
+                pen=pg.intColor(i, len(CHANNELS)), name=label
+            )
             group_curves[group].append((key, curve))
             box = QCheckBox(label)
             box.setChecked(default_on)

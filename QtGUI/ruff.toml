@@ -3,7 +3,7 @@
 # Vendored / third-party code is EXCLUDED below: ../tools is the upstream ODrive
 # tooling (old-style Python), ../GUI is the legacy GUI. Both are out of scope
 # for linting and may be refactored separately some day; lint only what we own.
-line-length = 120
+#line-length = 120
 
 [lint]
 select = ["E", "F", "I", "UP", "B", "RUF", "BLE", "C"]

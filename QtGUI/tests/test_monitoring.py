@@ -6,7 +6,7 @@ import time
 from conftest import MockDevice
 
 from backend import _PLOT_READERS
-from monitoring import BUFFER_SECONDS, CHANNELS, SAMPLE_INTERVAL_S, SampleBuffer
+from monitoring import BUFFER_SECONDS, CHANNELS, SAMPLE_INTERVAL_MS, SampleBuffer
 
 
 def test_window_slices_trailing_seconds():
@@ -33,11 +33,12 @@ def test_missing_channels_are_nan():
 
 
 def test_ring_retention():
-    buf = SampleBuffer()  # default 60 s / 0.01 s
+    buf = SampleBuffer()
     now = time.time()
-    for i in range(7000):  # more than maxlen (6000)
-        buf.append(now + i * SAMPLE_INTERVAL_S, {"vel": float(i)})
-    assert len(buf.rows) == int(BUFFER_SECONDS / SAMPLE_INTERVAL_S)
+    buf_max_len = int(BUFFER_SECONDS * 1000 / SAMPLE_INTERVAL_MS)
+    for i in range(buf_max_len + 1000):  # write more often than maxlen
+        buf.append(now + i * SAMPLE_INTERVAL_MS/1000, {"vel": float(i)})
+    assert len(buf.rows) == buf_max_len
 
 
 def test_csv_export_header_and_rows():

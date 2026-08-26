@@ -296,19 +296,17 @@ Implemented in `monitoring.py` (+ sampling in `backend.py`, Device > Live Plot�
   mechanical/electrical power (`controller.mechanical_power` /
   `electrical_power`), bus current (`motor.I_bus`), velocity integrator torque
   (`controller.vel_integrator_torque`).
-- Plot sampling runs at **100 Hz** on its own 10 ms timer (`plotTick`) — justified by the §3.4 Step 0 benchmark (~940 Hz × 4 ch ceiling); the status footer/control poll stays at 10 Hz (`updateReadings`). Sampling happens regardless of the window
+- Plot sampling runs at **~167 Hz** on its own 6 ms timer (`plotTick`) — budget from the §3.4 Step 0 benchmark: ~4000 Hz single-channel ceiling, keep total USB transfers **under 3000 Hz** for stability margin (15 readers × 167 Hz + 10 Hz status poll ≈ 2600 Hz); the status footer/control poll stays at 10 Hz (`updateReadings`). Sampling happens regardless of the window
   being open — history exists when the plot is opened; nothing sampled while
-  being open; nothing sampled while disconnected. Fixed-retention ring buffer (`SampleBuffer`, 60 s @ 100 Hz).
+  being open; nothing sampled while disconnected. Fixed-retention ring buffer (`SampleBuffer`, 60 s @ 167 Hz ≈ 10k rows).
 - Window selector 5/30/60 s; Pause freezes redraw only — sampling continues,
-  resume shows an unbroken trace. Full redraw of ≤600 pts/curve at 10 Hz
+  resume shows an unbroken trace. Full redraw of ≤833 pts/curve (5 s window; 10k worst-case) at 10 Hz
   (`connect="finite"`) instead of incremental append.
 
-#### 3.2 Data Logging
+#### 3.2 Data Logging (after the Recorder)
 
-- CSV logging at 100 ms.
-- Toggle via File menu.
-- Timestamped filenames (`odrive_YYYYMMDD_HHMMSS.csv`).
-- Header row with channel names.
+Not a separate logger: the Recorder (§3.4 Stage A) collects the data trace, and its per-recording **Save button** writes it out as CSV (`odrive_YYYYMMDD_HHMMSS.csv`, header row = channel labels). Reuses `SampleBuffer.csv()`; nothing new to build beyond wiring the button.
+- Rationale: one capture path instead of two parallel ones — anything worth logging is worth recording through the same interval/checkbox UI.
 
 #### 3.3 Dependencies
 
