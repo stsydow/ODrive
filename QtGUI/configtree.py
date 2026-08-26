@@ -36,16 +36,26 @@ _EDITABLE_ROLE = _NAME_ROLE + 3
 
 
 class _Node:
-    __slots__ = ("built", "children", "depth", "in_config", "name", "obj",
-                 "parent", "path", "row", "value")
+    __slots__ = (
+        "built",
+        "children",
+        "depth",
+        "in_config",
+        "name",
+        "obj",
+        "parent",
+        "path",
+        "row",
+        "value",
+    )
 
     def __init__(self, name, obj, parent, row, depth, in_config):
         self.name = name
-        self.path = None       # dotted path below the device root ("" = root)
-        self.obj = obj         # device object for branches, None for leaves
+        self.path = None  # dotted path below the device root ("" = root)
+        self.obj = obj  # device object for branches, None for leaves
         self.parent = parent
-        self.row = row         # row index within parent.children
-        self.depth = depth     # path components below the device root
+        self.row = row  # row index within parent.children
+        self.depth = depth  # path components below the device root
         self.in_config = in_config
         self.children = []
         self.built = False
@@ -153,8 +163,11 @@ class ConfigTreeModel(QAbstractItemModel):
         (and fibre members of unknown kind) classify via getattr.
         """
         cls_member = getattr(type(obj), name, None)
-        if (RemoteAttribute is not None and isinstance(cls_member, RemoteAttribute)
-                and cls_member._magic_getter):
+        if (
+            RemoteAttribute is not None
+            and isinstance(cls_member, RemoteAttribute)
+            and cls_member._magic_getter
+        ):
             return None  # scalar: name already match-checked above
         try:
             v = getattr(obj, name)
@@ -210,8 +223,11 @@ class ConfigTreeModel(QAbstractItemModel):
         if role == _PATH_ROLE:
             return node.path or ""
         if role == _EDITABLE_ROLE:
-            return (node.obj is None and node.in_config
-                    and isinstance(node.value, EDITABLE_TYPES))
+            return (
+                node.obj is None
+                and node.in_config
+                and isinstance(node.value, EDITABLE_TYPES)
+            )
         return None
 
     # -- write support ----------------------------------------------------

@@ -45,7 +45,10 @@ def test_set_mode_seeds_new_modes_setpoint(backend):
     # Start in velocity, set a velocity setpoint, then switch to position.
     backend.setActiveSetpoint(3.25)  # stored under the active (velocity) mode
     backend.setMode("Position")
-    assert backend.odrive.axis0.controller.config.control_mode == CONTROL_MODE_POSITION_CONTROL
+    assert (
+        backend.odrive.axis0.controller.config.control_mode
+        == CONTROL_MODE_POSITION_CONTROL
+    )
     # The previous mode's input is not written (regression guard).
     assert backend.odrive.axis0.controller.input_vel == 1.0
     # Position's stored setpoint (init 0.0) is the seed for the new mode.
@@ -61,7 +64,10 @@ def test_set_mode_not_writing_to_previous_mode(backend):
     backend.setActiveSetpoint(5.0)
     backend.setMode("Torque")
     assert backend.odrive.axis0.controller.input_vel == 1.0  # old input untouched
-    assert backend.odrive.axis0.controller.config.control_mode == CONTROL_MODE_TORQUE_CONTROL
+    assert (
+        backend.odrive.axis0.controller.config.control_mode
+        == CONTROL_MODE_TORQUE_CONTROL
+    )
 
 
 def _expected_inputs(mode):
@@ -105,7 +111,9 @@ def test_log_text_tracks_events(backend):
 def test_mode_change_overrides_passthrough(backend):
     axis = backend.odrive.axis0
     axis.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
-    axis.controller.config.control_mode = CONTROL_MODE_POSITION_CONTROL  # device-side state
+    axis.controller.config.control_mode = (
+        CONTROL_MODE_POSITION_CONTROL  # device-side state
+    )
     backend.setMode("Velocity")
     assert axis.controller.config.input_mode == INPUT_MODE_VEL_RAMP
     assert "input mode -> Velocity Ramp" in backend.logText
@@ -115,7 +123,9 @@ def test_unknown_input_mode_shown_as_extra_entry(backend):
     backend.odrive.axis0.controller.config.input_mode = 0x7F
     backend._input_mode_model_for(CONTROL_MODE_VELOCITY_CONTROL)
     assert backend.inputModes[-1] == "unknown (0x7F)"
-    assert backend.currentInputMode == len(MODES_BY_CONTROL[CONTROL_MODE_VELOCITY_CONTROL])
+    assert backend.currentInputMode == len(
+        MODES_BY_CONTROL[CONTROL_MODE_VELOCITY_CONTROL]
+    )
 
 
 def test_transport_error_triggers_reconnect(backend):
@@ -151,6 +161,7 @@ def test_object_lost_tick_drops_link_once(backend):
     """0.5.7-hardened: the EmptyInterface race raises ObjectLostError, which
     must drop the link exactly once like any other device-gone signal."""
     import fibre.libfibre as lf
+
     hits = []
     backend.connectOdrive = lambda: hits.append(1)
 

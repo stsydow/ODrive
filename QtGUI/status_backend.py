@@ -26,6 +26,7 @@ STATE_MAP = {
 # Reverse lookup for calibration-state labels (value -> "Full Calibration Sequence" ...)
 _CALIB_LABELS = {v: k for k, v in STATE_MAP.items()}
 
+
 def _state_display(value):
     if value in (odrive.enums.AXIS_STATE_IDLE, odrive.enums.AXIS_STATE_UNDEFINED):
         return "Idle"
@@ -36,9 +37,14 @@ def _state_display(value):
     if value == odrive.enums.AXIS_STATE_HOMING:
         return "Homing"
     short = AXIS_STATE_NAMES.get(value)
-    if short and any(k in short for k in ("CALIBRATION", "DIR_FIND", "INDEX_SEARCH", "LOCKIN")):
-        return "Calibration: " + _CALIB_LABELS.get(value, short.replace("_", " ").title())
+    if short and any(
+        k in short for k in ("CALIBRATION", "DIR_FIND", "INDEX_SEARCH", "LOCKIN")
+    ):
+        return "Calibration: " + _CALIB_LABELS.get(
+            value, short.replace("_", " ").title()
+        )
     return short or str(value)
+
 
 class StatusBackend(QObject):
     connChanged = Signal()
@@ -60,31 +66,43 @@ class StatusBackend(QObject):
         self.rendered_errors = None  # full rendered error text for the dialog
 
     @Property(str, notify=connChanged)
-    def connText(self): return self._conn_text
+    def connText(self):
+        return self._conn_text
 
     @Property(str, notify=connChanged)
-    def connColor(self): return self._conn_color
+    def connColor(self):
+        return self._conn_color
 
     @Property(bool, notify=connChanged)
-    def connected(self): return self._connected
+    def connected(self):
+        return self._connected
 
     @Property(str, notify=stateChanged)
-    def stateText(self): return self._state_text
+    def stateText(self):
+        return self._state_text
 
     @Property(str, notify=errorsChanged)
-    def errorText(self): return self._error_text
+    def errorText(self):
+        return self._error_text
 
     @Property(str, notify=errorsChanged)
-    def errorColor(self): return self._error_color
+    def errorColor(self):
+        return self._error_color
 
     @Property(str, notify=powerChanged)
-    def vbusText(self): return self._vbus_text
+    def vbusText(self):
+        return self._vbus_text
 
     @Property(str, notify=powerChanged)
-    def powerText(self): return self._power_text
+    def powerText(self):
+        return self._power_text
 
     def set_conn(self, text, color, connected):
-        changed = (self._conn_text != text or self._conn_color != color or self._connected != connected)
+        changed = (
+            self._conn_text != text
+            or self._conn_color != color
+            or self._connected != connected
+        )
         self._conn_text = text
         self._conn_color = color
         self._connected = connected
@@ -123,8 +141,10 @@ class StatusBackend(QObject):
         report = read_error_report(odrv)
         key = tuple(sorted((s.name, tuple(s.errors)) for s in report.sources))
         if key and key != self._last_error_key:
-            detail = "; ".join(f"{s.name}: {' | '.join(s.errors) if s.errors else f'0x{s.value:X}'}"
-                             for s in report.sources)
+            detail = "; ".join(
+                f"{s.name}: {' | '.join(s.errors) if s.errors else f'0x{s.value:X}'}"
+                for s in report.sources
+            )
             log_event_func("ERROR", f"axis errors -> {detail}")
             self._last_error_key = key
         elif not key and self._last_error_key:

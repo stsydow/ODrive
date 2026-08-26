@@ -44,16 +44,21 @@ def main():
 
     corr = np.corrcoef(dsample)[0, 1]  # rows are the variables → corr(Δt, Δtick)
     perc = np.percentile(dsample, [0, 5, 50, 95, 100], axis=1) * [1e-6, 1]
-    # perc: [5 percentiles, 2 vars], col 0 converted ns→ms; order: min, p5, median, p95, max
+    # perc: [5 percentiles, 2 vars], col 0 converted ns→ms;
+    # order: min, p5, median, p95, max
     p_dt_ms, p_dtick = perc[:, 0], perc[:, 1]
 
     print(f"\nspan:  {time_span:.3f} s / {tick_span} ticks / {n} samples")
     print(f"rate:  transfer {transfer_rate:.1f} Hz  / clock {clock_rate:.1f} Hz")
     print(
         f"\u0394t:       median {p_dt_ms[2]:.3f} ms "
-        f"(min: {p_dt_ms[0]:.3f} / p5: {p_dt_ms[1]:.3f} / p95: {p_dt_ms[3]:.3f} / max: {p_dt_ms[4]:.3f})"
+        f"(min: {p_dt_ms[0]:.3f} / p5: {p_dt_ms[1]:.3f} / "
+        f"p95: {p_dt_ms[3]:.3f} / max: {p_dt_ms[4]:.3f})"
     )
-    print(f"\u0394clock:  median {p_dtick[2]:.0f} ticks (min: {p_dtick[0]:.0f} / max: {p_dtick[4]:.0f})")
+    print(
+        f"\u0394clock:  median {p_dtick[2]:.0f} ticks "
+        f"(min: {p_dtick[0]:.0f} / max: {p_dtick[4]:.0f})"
+    )
     print(f"corr(\u0394t,\u0394clock): {corr:.3f}")
 
 

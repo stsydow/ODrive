@@ -43,8 +43,8 @@ class MockConfig:
 class MockController:
     def __init__(self):
         self.config = MockConfig(
-            control_mode=2,               # VELOCITY_CONTROL
-            input_mode=2,                 # VEL_RAMP
+            control_mode=2,  # VELOCITY_CONTROL
+            input_mode=2,  # VEL_RAMP
             vel_gain=0.5,
             vel_limit=88.0,
             circular_setpoints=False,
@@ -61,8 +61,9 @@ class MockController:
 class MockMotor:
     def __init__(self):
         # motor_name: a string-valued config leaf (read-only display rule).
-        self.config = MockConfig(current_lim=12.5, current_lim_margin=2.0,
-                                 motor_name="sew motor")
+        self.config = MockConfig(
+            current_lim=12.5, current_lim_margin=2.0, motor_name="sew motor"
+        )
         self.error = 0
 
 

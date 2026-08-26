@@ -26,8 +26,7 @@ def _walk(model, path):
 def test_tree_walks_object_graph(backend):
     backend.browserModel.reset()
     m = backend.browserModel
-    root_children = [m.data(m.index(r, 0), _NAME_ROLE)
-                     for r in range(m.rowCount())]
+    root_children = [m.data(m.index(r, 0), _NAME_ROLE) for r in range(m.rowCount())]
     assert "axis0" in root_children and "config" in root_children
     # callables (save_configuration, ...) are never traversed
     assert "save_configuration" not in root_children
@@ -56,12 +55,10 @@ def test_filter_keeps_matching_paths_only(backend):
     backend.browserModel.reset()
     m = backend.browserModel
     backend.browserModel.set_filter("Current_Lim")  # case-insensitive
-    root_children = [m.data(m.index(r, 0), _NAME_ROLE)
-                     for r in range(m.rowCount())]
+    root_children = [m.data(m.index(r, 0), _NAME_ROLE) for r in range(m.rowCount())]
     assert root_children == ["axis0"]  # only the chain holding matches
     cfg = _walk(m, "axis0.motor.config")
-    names = [m.data(m.index(r, 0, cfg), _NAME_ROLE)
-             for r in range(m.rowCount(cfg))]
+    names = [m.data(m.index(r, 0, cfg), _NAME_ROLE) for r in range(m.rowCount(cfg))]
     assert names == ["current_lim", "current_lim_margin"]
 
 
@@ -72,9 +69,12 @@ def test_write_commits_when_idle(backend):
     assert backend.odrive.axis0.motor.config.current_lim == 20.0
     assert "WRITE" in backend.logText
     # cached view value invalidated by the write
-    assert backend.browserModel.data(
-        _walk(backend.browserModel, "axis0.motor.config.current_lim"),
-        _VALUE_ROLE) == "20.0"
+    assert (
+        backend.browserModel.data(
+            _walk(backend.browserModel, "axis0.motor.config.current_lim"), _VALUE_ROLE
+        )
+        == "20.0"
+    )
 
 
 def test_write_refused_while_running(backend):
@@ -90,7 +90,9 @@ def test_write_type_checked_and_config_gated(backend):
     backend.browserModel.reset()
     backend.odrive.axis0.current_state = AXIS_STATE_IDLE
     # bool parses true/false; int accepts hex (enum leaves, odrivetool parity)
-    assert backend.writeBrowserValue("axis0.controller.config.enable_vel_limit", "false")
+    assert backend.writeBrowserValue(
+        "axis0.controller.config.enable_vel_limit", "false"
+    )
     assert backend.odrive.axis0.controller.config.enable_vel_limit is False
     assert backend.writeBrowserValue("axis0.controller.config.input_mode", "0x1")
     assert backend.odrive.axis0.controller.config.input_mode == 1

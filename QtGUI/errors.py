@@ -23,7 +23,7 @@ DEVICE_EXCEPTIONS = (
     ObjectLostError,
     EOFError,
     TimeoutError,
-    OSError,          # transport / I/O (ConnectionError is a subclass)
+    OSError,  # transport / I/O (ConnectionError is a subclass)
     asyncio.CancelledError,
 )
 
@@ -71,8 +71,11 @@ def read_error_report(odrv):
             if not val:
                 return
             # Inline bitmask decode: find all set error bits for the given prefix
-            bits = [n for n, const in vars(odrive.enums).items()
-                    if n.startswith(prefix) and isinstance(const, int) and (val & const)]
+            bits = [
+                n
+                for n, const in vars(odrive.enums).items()
+                if n.startswith(prefix) and isinstance(const, int) and (val & const)
+            ]
             sources.append(ErrorModule(name, val, bits))
 
         check("system", odrv.error, "ODRIVE_ERROR_")
@@ -80,7 +83,11 @@ def read_error_report(odrv):
         check("motor", axis0.motor.error, "MOTOR_ERROR_")
         check("encoder", axis0.encoder.error, "ENCODER_ERROR_")
         check("controller", axis0.controller.error, "CONTROLLER_ERROR_")
-        check("sensorless", axis0.sensorless_estimator.error, "SENSORLESS_ESTIMATOR_ERROR_")
+        check(
+            "sensorless",
+            axis0.sensorless_estimator.error,
+            "SENSORLESS_ESTIMATOR_ERROR_",
+        )
 
         report.sources = sources
     except (DEVICE_EXCEPTIONS, AttributeError):

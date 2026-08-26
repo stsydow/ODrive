@@ -61,7 +61,8 @@ def _send_key(item, key, text=""):
     KeyReleases make the spinbox template's text binding revert the edit —
     hence direct, KeyPress-only delivery."""
     QGuiApplication.sendEvent(
-        item, QKeyEvent(QEvent.KeyPress, key, Qt.KeyboardModifier.NoModifier, text))
+        item, QKeyEvent(QEvent.KeyPress, key, Qt.KeyboardModifier.NoModifier, text)
+    )
 
 
 def test_enter_in_setpoint_applies_to_device(qml, backend):
@@ -70,8 +71,11 @@ def test_enter_in_setpoint_applies_to_device(qml, backend):
     root = qml.rootObjects()[0]
     row = _find_qml(root, "velSetpoint")
     assert row is not None, "velocity setpoint row not found"
-    spin = next(c for c in row.findChildren(QObject, None)
-                if c.metaObject().className().startswith("DoubleSpinBox"))
+    spin = next(
+        c
+        for c in row.findChildren(QObject, None)
+        if c.metaObject().className().startswith("DoubleSpinBox")
+    )
     content = spin.property("contentItem")
     assert content is not None
     content.forceActiveFocus()
@@ -90,15 +94,21 @@ def test_settings_spinboxes_editable(qml):
     row per settings tab, found by objectName — scanning the whole window
     tree is unreliable offscreen."""
     root = qml.rootObjects()[0]
-    for name in ["motor.current_lim",          # Electrical Limits
-                 "controller.vel_limit",       # Mechanical Limits
-                 "controller.vel_gain"]:       # Control Parameters
+    for name in [
+        "motor.current_lim",  # Electrical Limits
+        "controller.vel_limit",  # Mechanical Limits
+        "controller.vel_gain",
+    ]:  # Control Parameters
         row = _find_qml(root, name)
         assert row is not None, f"{name} row not found"
-        spins = [c for c in row.findChildren(QObject, None)
-                 if c.metaObject().className().startswith("DoubleSpinBox")]
-        assert len(spins) == 1 and spins[0].property("editable"), \
+        spins = [
+            c
+            for c in row.findChildren(QObject, None)
+            if c.metaObject().className().startswith("DoubleSpinBox")
+        ]
+        assert len(spins) == 1 and spins[0].property("editable"), (
             f"{name}: spinbox missing or not editable"
+        )
 
 
 def test_mode_combo_follows_backend(qml):
@@ -132,7 +142,7 @@ def test_browser_model_methods_callable_from_qml(backend, qapp, tmp_path):
     @Slot-decorated. Undecorated Python methods on a QObject are invisible
     to QML ("Property 'reset' ... is not a function"), which silently broke
     the browser dialog's Refresh button and name filter once."""
-    probe = '''
+    probe = """
 import QtQuick
 Item {
     property string result: ""
@@ -146,7 +156,7 @@ Item {
         }
     }
 }
-'''
+"""
     path = tmp_path / "browser_probe.qml"
     path.write_text(probe)
     eng = QQmlApplicationEngine()

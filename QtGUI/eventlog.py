@@ -20,7 +20,7 @@ class LogEntry:
     """One time-stamped event in the in-memory log."""
 
     timestamp: float
-    category: str   # CONNECT / STATE / MODE / SETPOINT / CFG / ERROR / CLEAR
+    category: str  # CONNECT / STATE / MODE / SETPOINT / CFG / ERROR / CLEAR
     message: str
 
 

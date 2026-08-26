@@ -37,7 +37,7 @@ def test_ring_retention():
     now = time.time()
     buf_max_len = int(BUFFER_SECONDS * 1000 / SAMPLE_INTERVAL_MS)
     for i in range(buf_max_len + 1000):  # write more often than maxlen
-        buf.append(now + i * SAMPLE_INTERVAL_MS/1000, {"vel": float(i)})
+        buf.append(now + i * SAMPLE_INTERVAL_MS / 1000, {"vel": float(i)})
     assert len(buf.rows) == buf_max_len
 
 
@@ -54,13 +54,22 @@ def test_readers_against_mock_device():
     dev = MockDevice()
     axis = dev.axis0
     vals = {key: read(axis, dev) for key, read in _PLOT_READERS.items()}
-    assert vals["vel"] == 1.5          # MockEncoder.vel_estimate
-    assert vals["pos"] == 2.5          # no pos_circular on mock -> pos_estimate
-    assert vals["vel_in"] == 1.0       # controller.input_vel
-    assert vals["pos_in"] == 0.0       # MockController.input_pos default
-    assert vals["tq_in"] == 0.0        # MockController.input_torque default
-    assert vals["vbus"] == 24.0        # MockDevice.vbus_voltage
+    assert vals["vel"] == 1.5  # MockEncoder.vel_estimate
+    assert vals["pos"] == 2.5  # no pos_circular on mock -> pos_estimate
+    assert vals["vel_in"] == 1.0  # controller.input_vel
+    assert vals["pos_in"] == 0.0  # MockController.input_pos default
+    assert vals["tq_in"] == 0.0  # MockController.input_torque default
+    assert vals["vbus"] == 24.0  # MockDevice.vbus_voltage
     # mock fw exposes none of these endpoints -> NaN (feature-gated curves)
-    for key in ("iq", "i_a", "i_b", "torque", "p_mech", "p_elec",
-                "pos_sp", "vel_sp", "tq_sp"):
+    for key in (
+        "iq",
+        "i_a",
+        "i_b",
+        "torque",
+        "p_mech",
+        "p_elec",
+        "pos_sp",
+        "vel_sp",
+        "tq_sp",
+    ):
         assert math.isnan(vals[key]), key

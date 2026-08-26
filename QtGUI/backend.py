@@ -407,7 +407,8 @@ class GuiBackend(QObject):
                 controller.config.input_mode = default
                 self.logEvent(
                     "MODE",
-                    f"input mode -> {INPUT_MODES[default]} (default for {MODE_NAMES[control_mode]})",
+                    f"input mode -> {INPUT_MODES[default]} "
+                    f"(default for {MODE_NAMES[control_mode]})",
                 )
             except DEVICE_EXCEPTIONS as e:
                 logger.warning("failed to default input_mode: %s", e)

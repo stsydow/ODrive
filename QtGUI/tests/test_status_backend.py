@@ -9,7 +9,10 @@ def test_state_display_names():
     assert _state_display(odrive.enums.AXIS_STATE_IDLE) == "Idle"
     assert _state_display(odrive.enums.AXIS_STATE_CLOSED_LOOP_CONTROL) == "Control Loop"
     assert _state_display(odrive.enums.AXIS_STATE_STARTUP_SEQUENCE) == "Startup"
-    assert _state_display(odrive.enums.AXIS_STATE_MOTOR_CALIBRATION) == "Calibration: Motor Calibration"
+    assert (
+        _state_display(odrive.enums.AXIS_STATE_MOTOR_CALIBRATION)
+        == "Calibration: Motor Calibration"
+    )
 
 
 def test_set_conn_updates_properties(backend):
@@ -37,7 +40,9 @@ def test_error_transitions_log_events(backend):
     sb.update_readings(backend.odrive, backend._axis(), backend.logEvent)
     assert sb.errorText == "Err: 0x1"
     assert sb.errorColor == "red"
-    assert any(e.category == "ERROR" and "axis errors" in e.message for e in backend.event_log)
+    assert any(
+        e.category == "ERROR" and "axis errors" in e.message for e in backend.event_log
+    )
     backend.odrive.axis0.error = 0
     sb.update_readings(backend.odrive, backend._axis(), backend.logEvent)
     assert sb.errorText == "Err: OK"

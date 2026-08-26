@@ -15,8 +15,15 @@ import sys
 
 # Make the ODrive tools package (tools/odrive) importable when running
 # directly from the QtGUI directory without prior installation.
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "tools"))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "tools", "odrive", "pyfibre"))
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "tools")
+)
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(os.path.realpath(__file__)), "..", "tools", "odrive", "pyfibre"
+    ),
+)
 
 import odrive  # noqa: F401  (import side effects: register types / discovery)
 from PySide6.QtCore import QUrl
@@ -29,8 +36,12 @@ from backend import GuiBackend
 
 def main():
     parser = argparse.ArgumentParser(description="ODrive QML GUI - Axis 0")
-    parser.add_argument("-v", "--verbose", action="store_true",
-                        help="Enable DEBUG-level logging at startup")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable DEBUG-level logging at startup",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -40,7 +51,9 @@ def main():
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    QQuickStyle.setStyle("Fusion")  # desktop Qt Quick Controls style (matches the widget Fusion look)
+    QQuickStyle.setStyle(
+        "Fusion"
+    )  # desktop Qt Quick Controls style (matches the widget Fusion look)
 
     backend = GuiBackend(verbose=args.verbose)
 
