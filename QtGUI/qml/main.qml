@@ -7,6 +7,13 @@ ApplicationWindow {
     height: 560
     title: "ODrive QML GUI - Axis 0"
     visible: true
+    // Run/Stop button fills: one fixed danger/green per role, fine in both
+    // themes. The disabled grey is NOT hardcoded — it is sampled off a hidden
+    // always-disabled button, so the disabled look is pixel-identical to
+    // every other disabled control.
+    readonly property color runColor: "#2e7d32"
+    readonly property color stopColor: "#c62828"
+    readonly property color idleGrey: disabledProbe.palette.button
     color: palette.window
 
     menuBar: MenuBar {
@@ -55,16 +62,22 @@ ApplicationWindow {
         anchors.margins: 8
         spacing: 6
 
+        // palette-value donor: native disabled-button background, sampled live
+        Button { id: disabledProbe; enabled: false; visible: false; width: 0; height: 0 }
+
         // ── Control bar: Run / Stop / Program ─────────────────────────
+        // palette-driven so Fusion renders its own chrome.
         RowLayout {
             Button {
-                text: "▶ Run (Closed Loop)"
-                enabled: statusBackend.connected
+                text: "Start Control"
+                enabled: statusBackend.connected && backend.axisIdle
+                palette.button: enabled ? runColor : idleGrey
                 onClicked: backend.run()
             }
             Button {
-                text: "■ Stop (Idle)"
-                enabled: statusBackend.connected
+                text: "Stop"
+                enabled: statusBackend.connected && !backend.axisIdle
+                palette.button: enabled ? stopColor : idleGrey
                 onClicked: backend.stop()
             }
             Item { Layout.fillWidth: true }
@@ -72,12 +85,12 @@ ApplicationWindow {
             ComboBox {
                 id: stateCombo
                 model: backend.stateNames
-                enabled: statusBackend.connected
+                enabled: statusBackend.connected && backend.axisIdle
                 implicitContentWidthPolicy: ComboBox.WidestText
             }
             Button {
                 text: "Start"
-                enabled: statusBackend.connected
+                enabled: statusBackend.connected && backend.axisIdle
                 onClicked: backend.startState(stateCombo.currentText)
             }
         }

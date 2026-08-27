@@ -164,6 +164,7 @@ cheap at the measured ~4 kHz sequential link rate (`bench_poll_rate.py`, Plan §
 | **Event log, non-modal + live** | `logEvent` records device-side history (connect/state/mode/setpoint/error/clear) so a run-up to an error is visible, even offline. The viewer binds `backend.logText` live via the `logUpdated` signal (no polling), and works while disconnected. |
 | **No transient status-bar messages** | Action feedback and write failures go to the event log (persistent context), not ephemeral status messages. |
 | **Auto-connect/reconnect, no manual button** | Startup auto-connect + loss auto-reconnect; the footer shows state. |
+| **Live plot samples only active channels** | The plot window pushes its checkbox+control-mode-visible channel set (`setActiveChannels`) on every toggle; `_sample_plot` reads just those. Unchecked/gated channels stay NaN in ring buffer and CSV. Cap: `ACTIVE_CHANNEL_LIMIT` (15) concurrent channels per the USB read budget; extras are logged and dropped, not silently skipped or over-sampled. |
 | **Ctrl+C via `SIG_DFL`** | The Qt event loop is a blocking C++ call, so a Python `KeyboardInterrupt` isn't serviced during `exec()`. Restoring the default SIGINT action terminates reliably from any state. Safe because the GUI is monitor-only. |
 
 ## Device I/O: how libfibre reads actually work

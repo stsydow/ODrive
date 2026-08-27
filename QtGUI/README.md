@@ -42,19 +42,25 @@ the device is unplugged. While searching, the footer shows "Offline (retrying)" 
 device appears.
 
 1. Select your **Control Mode** (Velocity / Position / Torque) and **Input Mode**.
-2. Set the setpoint (editable field / arrows) and click **▶ Run** — the setpoint is sent
-   to the device on **Apply** / Enter, **not** while you type.
-3. Stop with **■ Stop** (goes to Idle).
-4. Use the **Program** dropdown and **Start** to run a calibration/axis state (states are
-   *not* executed just by selecting them).
+2. Set the setpoint (editable field / arrows) and click **Start Control** — the button
+   is green while the axis is Idle; the setpoint is sent to the device on **Apply** /
+   Enter, **not** while you type.
+3. Stop with **Stop** (red while running; goes to Idle). The live-plot window has its
+   own always-visible **Stop Device** button.
+4. Use the **Program** dropdown and **Start** to run a calibration/axis state — both are
+   only enabled while Idle (states are *not* executed just by selecting them).
 5. Tune gains/limits in the **Settings** tabs (Electrical Limits · Mechanical Limits ·
    Control Parameters); rows the firmware doesn't expose are disabled.
+6. Open the **Live Plot** (Debug menu → *Live Plot…*) to chart position, velocity,
+   torque, currents, power, bus voltage and analog inputs (e.g. Input GPIO3 = ADC
+   0–3.3 V normalized to 0.0–1.0). Uncheck channels to drop them from sampling;
+   max 15 channels at once.
 
 ### Menus
 
 - **Device** — Save Config, Export/Import Config, Reboot, Errors (decoded, with Clear),
   Device Info.
-- **Debug** — Verbose Logging, Event Log…, Force Reconnect.
+- **Debug** — Verbose Logging, Event Log…, Force Reconnect, Live Plot…
 
 The Errors dialog is also opened by clicking the `Err:` field in the status footer. The
 Error, Device Info, and Event Log dialogs are separate movable windows.

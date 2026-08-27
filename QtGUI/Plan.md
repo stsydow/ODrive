@@ -8,6 +8,13 @@ This document covers the **features and the context for why they exist**:
 - Implementation details (connection, threading, design decisions) → **`ARCHITECTURE.md`**
 
 ---
+## Working notes — where I left off
+- GPIO curve / filter / dead zone
+- friction feed forward
+- learn kalman filter
+- oscilloscope?
+
+---
 
 ## Design Principles
 

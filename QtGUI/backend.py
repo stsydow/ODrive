@@ -39,7 +39,13 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from configtree import ConfigTreeModel
 from errors import DEVICE_EXCEPTIONS
 from eventlog import LogEntry, format_log
-from monitoring import SAMPLE_INTERVAL_MS, PlotWindow, SampleBuffer
+from monitoring import (
+    ACTIVE_CHANNEL_LIMIT,
+    CHANNELS,
+    SAMPLE_INTERVAL_MS,
+    PlotWindow,
+    SampleBuffer,
+)
 from status_backend import STATE_MAP, StatusBackend
 
 logger = logging.getLogger(__name__)
@@ -99,6 +105,15 @@ def _torque_reader(axis, _odrv):
     return iq * float(tc) if not math.isnan(iq) and tc is not None else math.nan
 
 
+def _adc_reader(gpio):
+    """Analog input on `gpio` as 0-1 fraction of 3.3 V.
+    gpio=3 is live today; gpio=4 uses the same analog mode when needed."""
+    def read(_axis, odrv):
+        fn = getattr(odrv, "get_adc_voltage", None)
+        return float(fn(gpio)) / 3.3 if fn else math.nan
+    return read
+
+
 _PLOT_READERS = {
     "vel": lambda a, d: _f(a.encoder, "vel_estimate"),
     "pos": _pos_reader,
@@ -117,6 +132,8 @@ _PLOT_READERS = {
     "p_mech": lambda a, d: _f(a.controller, "mechanical_power"),
     "p_elec": lambda a, d: _f(a.controller, "electrical_power"),
     "vbus": lambda a, d: _f(d, "vbus_voltage"),
+    # analog inputs: GPIO3 live today, GPIO4 same analog mode when needed
+    "adc3": _adc_reader(3),
 }
 
 # Input modes exposed in the selector. Value -> display label.
@@ -182,6 +199,11 @@ class GuiBackend(QObject):
 
         self.event_log = deque(maxlen=1000)
         self.samples = SampleBuffer()
+        # channels sampled per plot tick; starts as the default-on registry
+        # entries so opening the plot later still finds history
+        self._active_channels = {
+            key for key, _, default_on, *_ in CHANNELS if default_on
+        }
         self._plot_window = None
         self._config_model = ConfigTreeModel(self)
 
@@ -328,6 +350,9 @@ class GuiBackend(QObject):
     # -- helpers -------------------------------------------------------
 
     def _axis(self):
+        """Axis 0 reference, or None while disconnected / link gone."""
+        if self.odrive is None:
+            return None
         try:
             return self.odrive.axis0
         except DEVICE_EXCEPTIONS:
@@ -882,10 +907,26 @@ class GuiBackend(QObject):
         self._plot_window.raise_()
         self._plot_window.activateWindow()
 
+    def setActiveChannels(self, keys):
+        """Set of channel keys the plot window wants sampled (checkbox +
+        control-mode gated). Anything beyond ACTIVE_CHANNEL_LIMIT is logged
+        and dropped, not silently over-subscribed on USB."""
+        keys = list(keys)
+        if len(keys) > ACTIVE_CHANNEL_LIMIT:
+            self.logEvent(
+                "ERROR",
+                f"live plot: max {ACTIVE_CHANNEL_LIMIT} channels active,"
+                f" ignoring extras ({len(keys)} requested)",
+            )
+            keys = keys[:ACTIVE_CHANNEL_LIMIT]
+        self._active_channels = set(keys)
+
     def _sample_plot(self):
         """Append one plot sample per plot tick; missing endpoints
-        become NaN. Runs regardless of the window being open, so opening the
-        plot later already shows history. getattr-gated like everything else
+        become NaN. Only channels the plot window marked active are read —
+        unchecked/mode-gated ones stay NaN in buffer and CSV. Runs regardless
+        of the window being open, so opening the plot later already shows
+        history. getattr-gated like everything else
         (AttributeError here would falsely trigger a reconnect).
         """
         axis = self._axis()
@@ -893,7 +934,11 @@ class GuiBackend(QObject):
             return
         self.samples.append(
             time.time(),
-            {key: read(axis, self.odrive) for key, read in _PLOT_READERS.items()},
+            {
+                key: read(axis, self.odrive)
+                for key, read in _PLOT_READERS.items()
+                if key in self._active_channels
+            },
         )
 
     def _read_estimates(self):

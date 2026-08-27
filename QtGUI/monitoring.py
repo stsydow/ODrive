@@ -15,6 +15,7 @@ from odrive.enums import CONTROL_MODE_POSITION_CONTROL as _MODE_POS
 from odrive.enums import CONTROL_MODE_TORQUE_CONTROL as _MODE_TQ
 from odrive.enums import CONTROL_MODE_VELOCITY_CONTROL as _MODE_VEL
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -32,6 +33,7 @@ _GROUPS = [
     ("current", "Current", "A"),
     ("power", "Power", "W"),
     ("voltage", "Bus V", "V"),
+    ("adc", "Input GPIO3 (0-1)", ""),
 ]
 
 # Channel key -> (label, shown by default, group, required control mode or None).
@@ -53,14 +55,21 @@ CHANNELS = [
     ("p_mech", "Mech. power", False, "power", None),
     ("p_elec", "Elec. power", True, "power", None),
     ("vbus", "Bus voltage", False, "voltage", None),
+    ("adc3", "Input GPIO3", True, "adc", None),
 ]
 
 # ~4000 Hz USB transfer ceiling; keep 1/4 as margin
 # SAMPLE_INTERVAL_MS = 1000ms / ( 4000Hz * 3/4 / channel_max); channel_max=15
+# (= ACTIVE_CHANNEL_LIMIT; 15 ch * 200 Hz == full budget, real margin comes
+# from mode-gated channels not being counted as active)
 SAMPLE_INTERVAL_MS = 5  # plot sampling 200 Hz
 BUFFER_SECONDS = 60.0  # retention == widest selectable plot window
 
 PLOT_INTERVAL_CHOICES = [5, 10, 30, 60]
+
+# Max channels sampled per tick (USB read budget at the interval above).
+# Enforced by backend.setActiveChannels; extras are logged and ignored.
+ACTIVE_CHANNEL_LIMIT = 15
 
 
 class SampleBuffer:
@@ -126,6 +135,20 @@ class PlotWindow(QWidget):
         bar.addWidget(combo)
         bar.addWidget(self._pause_btn)
         bar.addStretch()
+        # E-stop within reach even fullscreen: idle the motor from the plot.
+        # One fixed danger-red fine in both themes; ONLY Active/Inactive groups
+        # are overridden — the system's own Disabled colors stay untouched, so
+        # greyed-out matches other disabled widgets automatically.
+        self._stop_btn = QPushButton("Stop Device")
+        palette = self._stop_btn.palette()
+        fill = QColor("#c62828")
+        for cg in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
+            palette.setColor(cg, QPalette.ColorRole.Button, fill)
+        self._stop_btn.setPalette(palette)
+        self._stop_btn.clicked.connect(backend.stop)
+        backend.idleChanged.connect(self._sync_stop_btn)
+        self._sync_stop_btn()
+        bar.addWidget(self._stop_btn)
 
         import pyqtgraph as pg  # deferred: heavy import only on first open
 
@@ -154,10 +177,11 @@ class PlotWindow(QWidget):
         assert first is not None  # _GROUPS is non-empty
         self._plot = first
 
-        # One checkbox per channel; unchecked hides the curve (sampling and
-        # buffering are unaffected — CSV export stays complete). Setpoint/
-        # Input curves additionally require their control mode to be active.
-        # A row with no active curve is hidden entirely (_update_rows).
+        # One checkbox per channel; unchecked hides the curve AND stops
+        # sampling it (buffer/CSV keep those columns as NaN — see setActive-
+        # Channels). Setpoint/Input curves additionally require their control
+        # mode to be active. A row with no active curve is hidden entirely
+        # (_update_rows).
         channel_box = QHBoxLayout()
         group_curves: dict[str, list[tuple[str, pg.PlotDataItem]]] = {
             gid: [] for gid, *_ in _GROUPS
@@ -192,6 +216,12 @@ class PlotWindow(QWidget):
         timer.timeout.connect(self.refresh)
         timer.start()
 
+    def _sync_stop_btn(self):
+        """Stop button tracks axisIdle: greyed out when there's nothing to stop."""
+        backend = self._backend
+        idle = bool(backend.axisIdle) if backend.odrive is not None else True
+        self._stop_btn.setEnabled(not idle)
+
     def refresh(self) -> None:
         if self.paused:
             return
@@ -206,9 +236,11 @@ class PlotWindow(QWidget):
 
     def _update_rows(self) -> None:
         """Apply checkbox + control-mode gating per curve; hide rows without
-        active curves; time ticks only on bottom-most visible row."""
+        active curves; time ticks only on bottom-most visible row; push the
+        visible-channel set to the backend so only those get sampled."""
         mode = self._backend.plotMode()
         last_visible = -1
+        active: set[str] = set()
         for gi, (gid, *_) in enumerate(_GROUPS):
             any_on = False
             for key, curve in self._group_curves[gid]:
@@ -217,6 +249,8 @@ class PlotWindow(QWidget):
                 if curve.isVisible() != vis:
                     curve.setVisible(vis)
                 any_on |= vis
+                if vis:
+                    active.add(key)
             self._plots[gid].setVisible(any_on)
             if any_on:
                 last_visible = gi
@@ -228,6 +262,7 @@ class PlotWindow(QWidget):
         for key, ch_mode in self._curve_mode.items():
             if ch_mode is not None:
                 self._boxes[key].setVisible(ch_mode == mode)
+        self._backend.setActiveChannels(active)
         self.refresh()
 
     def _on_window_changed(self, idx: int) -> None:
