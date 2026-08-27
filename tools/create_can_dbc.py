@@ -1,4 +1,4 @@
-from cantools.database import *
+from cantools.database import can, dump_file, load_file
 from odrive.enums import *
 
 msgList = []
@@ -20,12 +20,12 @@ for axisID in range(0, 8):
     trajectoryDoneFlag = can.Signal("Trajectory_Done_Flag", 63, 1, receivers=['Master'])
 
     heartbeatMsg = can.Message(
-        0x001, "Heartbeat", 8, 
+        0x001, "Heartbeat", 8,
         [
-            axisError, 
-            axisState, 
-            motorErrorFlag, 
-            encoderErrorFlag, 
+            axisError,
+            axisState,
+            motorErrorFlag,
+            encoderErrorFlag,
             controllerErrorFlag,
             trajectoryDoneFlag
         ], send_type='cyclic', cycle_time=100, senders=[newNode.name]
@@ -220,7 +220,7 @@ for axisID in range(0, 8):
         #     signal.name = f"Axis{axisID}_{signal.name}"
 
     msgList.append(axisMsgs)
-    
+
 
 from itertools import chain
 msgList = list(chain.from_iterable(msgList))
