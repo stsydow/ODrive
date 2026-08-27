@@ -20,7 +20,12 @@ sys.path.insert(0, str(QTGUI.parent / "tools" / "odrive" / "pyfibre"))
 
 import odrive  # noqa: E402,F401  (import side effects: register discovery/types)
 import pytest  # noqa: E402
-from PySide6.QtCore import QUrl  # noqa: E402
+from PySide6.QtCore import QLocale, QUrl  # noqa: E402
+
+# Pin the locale so QML's Qt.locale() parsing (used by the Enter/Apply path)
+# is deterministic regardless of host OS language — de_DE would reject "2.5"
+# (comma decimal) and break the setpoint tests. Must precede QApplication.
+QLocale.setDefault(QLocale(QLocale.English, QLocale.UnitedStates))
 from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
 from PySide6.QtQuickControls2 import QQuickStyle  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
@@ -176,3 +181,11 @@ def qml(backend):
         if hasattr(w, "close"):
             w.close()
     eng.deleteLater()
+    # Process deferred deletes NOW, while `backend`/`statusBackend` are still
+    # alive. If destruction is left to the next event-loop spin (or process
+    # exit), QML re-evaluates bindings against the already-garbage-collected
+    # backend and floods stderr with "Cannot read property ... of null" +
+    # StatusBackend AttributeErrors.
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
