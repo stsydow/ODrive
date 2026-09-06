@@ -137,6 +137,88 @@ def test_input_mode_combo_links_to_control_mode(qml, backend):
     assert backend.odrive.axis0.controller.config.input_mode == INPUT_MODE_POS_FILTER
 
 
+def test_analog_mapping_disables_setpoint_row(qml, backend):
+    """While an analog mapping drives the active setpoint, that setpoint row
+    is disabled and mirrors the live mapped value; disabling re-enables it."""
+    root = qml.rootObjects()[0]
+    row = _find_qml(root, "velSetpoint")
+    spin = next(
+        c
+        for c in row.findChildren(QObject, None)
+        if c.metaObject().className().startswith("DoubleSpinBox")
+    )
+    # Not externally driven by default: the row is editable.
+    assert not row.property("externallyDriven")
+    assert spin.property("enabled")
+    # Enable the analog input -> velocity mapping, then move the live value.
+    backend.setAnalogTarget("Velocity")
+    backend.odrive.axis0.controller.input_vel = 7.25
+    backend._sync_analog()
+    _process_events(qml)
+    assert row.property("externallyDriven")
+    assert not spin.property("enabled")
+    assert spin.property("value") == 7.25
+    # Disabling the mapping re-enables the row.
+    backend.setAnalogTarget("Disabled")
+    _process_events(qml)
+    assert not row.property("externallyDriven")
+    assert spin.property("enabled")
+
+
+def test_analog_update_does_not_clobber_undriven_row(qml, backend):
+    """Live analog updates must never overwrite in-progress edits in an
+    un-driven setpoint row."""
+    root = qml.rootObjects()[0]
+    row = _find_qml(root, "posSetpoint")
+    spin = next(
+        c
+        for c in row.findChildren(QObject, None)
+        if c.metaObject().className().startswith("DoubleSpinBox")
+    )
+    spin.setProperty("value", 42.0)
+    _process_events(qml)
+    # Simulate high-frequency analog updates (ADC noise / input moving)
+    backend._set_analog_state("Disabled", 15.0)
+    _process_events(qml)
+    assert spin.property("value") == 42.0
+
+
+def test_setpoint_row_analog_checkbox_and_bounds(qml, backend):
+    root = qml.rootObjects()[0]
+    row = _find_qml(root, "velSetpoint")
+    cb = next(
+        c
+        for c in row.findChildren(QObject, None)
+        if "CheckBox" in c.metaObject().className()
+    )
+    assert not cb.property("checked")
+    # Toggle on
+    cb.setProperty("checked", True)
+    cb.toggled.emit()
+    _process_events(qml)
+    assert backend.analogTarget == "Velocity"
+
+    # Toggle off
+    cb.setProperty("checked", False)
+    cb.toggled.emit()
+    _process_events(qml)
+    assert backend.analogTarget == "Disabled"
+
+
+def test_all_spinboxes_keyboard_editable(qml):
+    """Accessibility: every DoubleSpinBox across the UI must have editable=True
+    to accept typed keyboard input."""
+    root = qml.rootObjects()[0]
+    spins = [
+        c
+        for c in root.findChildren(QObject, None)
+        if c.metaObject().className().startswith("DoubleSpinBox")
+    ]
+    assert len(spins) >= 12  # setpoints (3*3) + settings (3) + deadband (3)
+    for spin in spins:
+        assert spin.property("editable") is True, f"Spinbox {spin} is not keyboard editable"
+
+
 def test_browser_model_methods_callable_from_qml(backend, qapp, tmp_path):
     """P1 regression guard: ConfigTreeModel.reset()/set_filter() must stay
     @Slot-decorated. Undecorated Python methods on a QObject are invisible

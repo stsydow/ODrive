@@ -60,6 +60,10 @@ class MockController:
         self.input_vel = 1.0
         self.input_torque = 0.0
         self.input_pos = 0.0
+        # Target endpoints the analog (pedal) mapping can point at.
+        self._input_vel_property = object()
+        self._input_torque_property = object()
+        self._input_pos_property = object()
         self.error = 0
 
 
@@ -79,6 +83,19 @@ class MockEncoder:
         self.error = 0
 
 
+class MockGpioMapping:
+    """gpioN_analog_mapping: an ADC->endpoint mapping (firmware low_level)."""
+
+    def __init__(self):
+        self.endpoint = None
+        self.min = 0.0
+        self.max = 0.0
+        self.deadband_enable = False
+        self.deadband_start = 0.0
+        self.deadband_end = 0.0
+        self.deadband_level = 0.0
+
+
 class MockAxis:
     def __init__(self, current_state=1):  # 1 = IDLE
         self.config = MockConfig()
@@ -96,7 +113,12 @@ class MockDevice:
 
     def __init__(self):
         self.axis0 = MockAxis()
-        self.config = MockConfig()
+        self.config = MockConfig(
+            gpio3_mode=0,
+            gpio3_analog_mapping=MockGpioMapping(),
+            gpio4_mode=0,
+            gpio4_analog_mapping=MockGpioMapping(),
+        )
         self.error = 0
         self.vbus_voltage = 24.0
         self.ibus = 0.3
@@ -161,6 +183,7 @@ def backend(mock_device, qapp):
     b = GuiBackend()
     b.connectOdrive = lambda: None  # never spawn the discovery thread
     b.odrive = mock_device
+    b._load_analog_bounds()
     b.status_backend.set_conn("\u25cf Online", "green", True)
     b._input_mode_model_for(2)
     yield b
