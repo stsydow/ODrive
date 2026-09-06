@@ -9,7 +9,10 @@ This document covers the **features and the context for why they exist**:
 
 ---
 ## Working notes — where I left off
--  dead zone -> idle
+- dead zone -> idle (DONE ✅: firmware `deadband_idle` with safety arm latch + GUI toggle)
+- status bar error decode & merged badge (DONE ✅: `Connecting | Error | Idle (Armed/Disarmed) | Running | Calibration...`)
+- pre-calibrated save workflow (DONE ✅: `Device` -> `Save as Pre-Calibrated...`)
+- expose startup closed-loop control in Control Parameters (DONE ✅)
 - spline GPIO curve /
 - friction feed forward
 - learn kalman filter
@@ -503,10 +506,17 @@ General project rule — see **Design Principles** at the top of this document. 
 
 ### 4.7 Status footer
 
-A composed status footer (permanent right-hand widget in the status bar) shows, in separate labeled fields — no duplicate/overlapping connection text:
-- **Connection indicator**: `● Online` (green) / `● Offline` (red) / `● Connecting…` / `● Rebooting…` (orange).
-- **Axis state**: always shown (`State: <AXIS_STATE_NAMES>`, e.g. `IDLE`, `CLOSED_LOOP_CONTROL`, `MOTOR_CALIBRATION`), not only while running.
-- **Error state**: `Err: OK` (green) or `Err: <id>` (red), refreshed with the 100 ms poll. Decoding/hints come with Phase 2 (Error Display).
+A composed status footer (status bar) shows unified device state on the left and power telemetry on the right:
+- **Unified primary status badge** (merged connection, axis state, and error indicator):
+  - **Offline:** `● Offline` (gray)
+  - **Connecting / Rebooting:** `● Connecting…` / `● Rebooting…` (orange)
+  - **Error (highest priority when connected):** `● Error: <DECODED_NAME>` (red; clickable with pointing hand cursor to open the Error Dialog)
+  - **Running:** `● Running` (green) when in `AXIS_STATE_CLOSED_LOOP_CONTROL`
+  - **Idle (when in `AXIS_STATE_IDLE`):**
+    - `● Idle (Armed)` (amber/orange) if `deadband_idle` is active and control is armed
+    - `● Idle (Disarmed)` (gray) if `deadband_idle` is active but control is disarmed (safe)
+    - `● Idle` (gray) for standard idle
+  - **Calibration / Homing / Startup:** `● Calibration: <Type>` / `● Homing` / `● Startup` (blue)
 - **Bus voltage** (V), from `vbus_voltage`.
 - **Power draw** (W) = `vbus_voltage × ibus`.
 
@@ -529,15 +539,23 @@ only the permanent connection/state/error/bus states.
 
 ## 6. What's Next
 
-### 6.1 Analog Input — row-based redesign (completed)
+### 6.1 Analog Input — row-based redesign (completed ✅)
 
 Row-based split per `ARCHITECTURE.md` §"Analog Input":
 - Target-side directly on setpoint rows: enable checkbox + min + max with native units.
-- Source-side in Settings → "Analog Input" tab: GPIO selector (GPIO 3/4) + deadband fields.
+- Source-side in Settings → "Analog Input" tab: GPIO selector (GPIO 3/4), deadband fields, and "Idle in deadband".
 - Backend projects active mapping to {gpio, target, min, max, deadband}, IDLE-gated.
+- Firmware `deadband_idle` option: disengages motor to `AXIS_STATE_IDLE` in deadband (freewheeling handwheel, cold FETs) and re-engages `CLOSED_LOOP_CONTROL` when pressed.
+- Safety Arm Latch in firmware: requires deliberate arming (manual run or `startup_closed_loop_control`); disarms on any axis error or manual stop to IDLE.
 
-### 6.2 Optional
+### 6.2 Pre-Calibration & Startup Workflow (completed ✅)
 
-- `CONTEXT.md` glossary with the settled vocabulary (pedal target / pedal source / enabled
-  = endpoint set / driven row) — terms are agreed, file not yet written.
+- Menu item `Device` → `Save as Pre-Calibrated…`: puts axis in IDLE, writes `motor.config.pre_calibrated = True` and `encoder.config.pre_calibrated = True`, saves to NVM, and reboots.
+- Re-boot on NVM save: `saveConfig` and `savePreCalibrated` absorb expected device reboot without false-alarm disconnect dialogs.
+- "Start closed loop on boot" (`startup_closed_loop_control` on `axis.config`) exposed as a CheckRow in the Control Parameters tab.
+
+### 6.3 Optional & Next
+
+- `CONTEXT.md` glossary with settled vocabulary (input target / input source / enabled = endpoint set / driven row).
+- Friction feedforward and nonlinear response curve exploration.
 
