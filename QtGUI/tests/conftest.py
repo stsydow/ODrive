@@ -71,13 +71,17 @@ class MockMotor:
     def __init__(self):
         # motor_name: a string-valued config leaf (read-only display rule).
         self.config = MockConfig(
-            current_lim=12.5, current_lim_margin=2.0, motor_name="sew motor"
+            current_lim=12.5,
+            current_lim_margin=2.0,
+            motor_name="sew motor",
+            pre_calibrated=False,
         )
         self.error = 0
 
 
 class MockEncoder:
     def __init__(self):
+        self.config = MockConfig(pre_calibrated=False)
         self.vel_estimate = 1.5
         self.pos_estimate = 2.5
         self.error = 0
