@@ -216,7 +216,9 @@ def test_all_spinboxes_keyboard_editable(qml):
     ]
     assert len(spins) >= 12  # setpoints (3*3) + settings (3) + deadband (3)
     for spin in spins:
-        assert spin.property("editable") is True, f"Spinbox {spin} is not keyboard editable"
+        assert spin.property("editable") is True, (
+            f"Spinbox {spin} is not keyboard editable"
+        )
 
 
 def test_browser_model_methods_callable_from_qml(backend, qapp, tmp_path):
