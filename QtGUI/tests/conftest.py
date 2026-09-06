@@ -103,7 +103,7 @@ class MockGpioMapping:
 
 class MockAxis:
     def __init__(self, current_state=1):  # 1 = IDLE
-        self.config = MockConfig()
+        self.config = MockConfig(startup_closed_loop_control=False)
         self.controller = MockController()
         self.motor = MockMotor()
         self.encoder = MockEncoder()

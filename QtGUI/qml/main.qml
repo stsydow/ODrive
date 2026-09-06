@@ -219,6 +219,7 @@ ApplicationWindow {
                         SpinRow { attr: "pos_gain"; base: "controller"; label: "Position gain"; unit: "(turn/s)/turn"; min: 0; max: 100; decimals: 3; step: 0.1; Layout.fillWidth: true }
                         SpinRow { attr: "inertia"; base: "controller"; label: "Inertia (feed-forward)"; unit: "N·m/(turn/s²)"; min: -50; max: 50; decimals: 4; step: 0.001; Layout.fillWidth: true }
                         CheckRow { attr: "enable_gain_scheduling"; base: "controller"; label: "Gain scheduling"; Layout.fillWidth: true }
+                        CheckRow { attr: "startup_closed_loop_control"; base: "axis"; label: "Start closed loop on boot"; tip: "Automatically enter closed-loop control on startup"; Layout.fillWidth: true }
                     }
 
                     // Analog Input source settings — GPIO pin + deadband.
