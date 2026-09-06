@@ -142,6 +142,31 @@ gap: a ≤100 ms poll-lag race where a click lands just after the axis left IDLE
 since the firmware enforces real safety; only the browser's long-lived editor needs the strict
 commit-time re-check.
 
+## Analog Input
+
+Firmware: one mapping struct **per GPIO** (`odrive.config.gpioN_analog_mapping` /
+`analog_mappings[i]` = {endpoint, min, max, deadband_*}); a 10 ms poll thread writes the
+scaled ADC value to every slot whose **endpoint ref is valid** — enable *is* a non-null
+endpoint, and `gpioN_mode = ANALOG_IN` is only the prerequisite for a valid ADC reading.
+The endpoint is generic (any fibre endpoint); the common case is a controller input
+(`controller._input_{vel,pos,torque}_property`), which is mode-agnostic — the mapping never
+reads the control mode.
+
+GUI split by parameter dependence:
+- **Input target** (units follow the setpoint) → **on the setpoint row**: enable checkbox + min + max.
+  Radio: one row is the input target at a time; enabling a row retargets the mapping to that
+  row's input and disables the others. The driven row is disabled and mirrors the live
+  mapped value.
+- **Input source** (parameter-independent) → **Settings → "Analog Input" tab**: GPIO
+  selector (fixed list 3/4, the ADC-capable pins) + deadband fields (guarded — the
+  firmware properties may be absent on older fw).
+- All mapping writes are board-level → **IDLE-gated** like the limits tabs. The device's
+  `analog_mappings[active_gpio]` is the source of truth; the backend projects it to
+  {active_gpio, target row, min, max, deadband} and polls the live mapped value.
+
+Status: row-based split implemented. One active input mapping at a time; other
+sensors/control lines may reuse the source side.
+
 # ponytail: the browser's EXPANSION walk reads scalar values too (~40 reads/expansion);
 cheap at the measured ~4 kHz sequential link rate (`bench_poll_rate.py`, Plan §3.4 Step 0). The filter scan is already name-only (see above).
 

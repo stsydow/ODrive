@@ -134,6 +134,7 @@ ApplicationWindow {
                 // reuses the last applied value).
                 SetpointRow {
                     objectName: "velSetpoint"
+                    targetName: "Velocity"
                     label: "Velocity Setpoint (rps):"
                     backendValue: backend.velSetpoint
                     estimate: backend.velEstimateText
@@ -143,6 +144,7 @@ ApplicationWindow {
                 }
                 SetpointRow {
                     objectName: "torqueSetpoint"
+                    targetName: "Torque"
                     label: "Torque Setpoint (N·m):"
                     backendValue: backend.torqueSetpoint
                     pointMin: -10; pointMax: 10; decimals: 3; step: 0.01
@@ -151,6 +153,7 @@ ApplicationWindow {
                 }
                 SetpointRow {
                     objectName: "posSetpoint"
+                    targetName: "Position"
                     label: "Position Setpoint (rev):"
                     backendValue: backend.posSetpoint
                     estimate: backend.posEstimateText
@@ -175,6 +178,7 @@ ApplicationWindow {
                     TabButton { text: "Electrical Limits" }
                     TabButton { text: "Mechanical Limits" }
                     TabButton { text: "Control Parameters" }
+                    TabButton { text: "Analog Input" }
                 }
                 StackLayout {
                     Layout.fillWidth: true
@@ -214,6 +218,69 @@ ApplicationWindow {
                         SpinRow { attr: "pos_gain"; base: "controller"; label: "Position gain"; unit: "(turn/s)/turn"; min: 0; max: 100; decimals: 3; step: 0.1; Layout.fillWidth: true }
                         SpinRow { attr: "inertia"; base: "controller"; label: "Inertia (feed-forward)"; unit: "N·m/(turn/s²)"; min: -50; max: 50; decimals: 4; step: 0.001; Layout.fillWidth: true }
                         CheckRow { attr: "enable_gain_scheduling"; base: "controller"; label: "Gain scheduling"; Layout.fillWidth: true }
+                    }
+
+                    // Analog Input source settings — GPIO pin + deadband.
+                    // IDLE-gated like the limits tabs (board-level gpio/mapping writes).
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        enabled: statusBackend.connected && backend.axisIdle
+                        spacing: 6
+
+                        Label {
+                            text: "Source configuration for the analog input (ADC) mapped to the active setpoint."
+                            color: "gray"
+                            Layout.fillWidth: true
+                        }
+                        RowLayout {
+                            Label { text: "Analog Pin:" }
+                            ComboBox {
+                                id: analogPinCombo
+                                model: ["GPIO 3", "GPIO 4"]
+                                currentIndex: backend.analogGpio === 4 ? 1 : 0
+                                onActivated: function(index) { backend.setAnalogGpio(index === 1 ? 4 : 3) }
+                            }
+                            Item { Layout.fillWidth: true }
+                        }
+                        Label {
+                            text: "Live input value: " + backend.analogValue.toFixed(3)
+                            color: "gray"
+                        }
+
+                        CheckBox {
+                            text: "Enable deadband"
+                            checked: backend.analogDeadbandEnable
+                            visible: backend.analogDeadbandAvailable
+                            onToggled: backend.setAnalogDeadbandEnable(checked)
+                        }
+                        RowLayout {
+                            visible: backend.analogDeadbandAvailable
+                            Label { text: "Deadband Start:" }
+                            DoubleSpinBox {
+                                editable: true
+                                from: 0; to: 1; decimals: 3; stepSize: 0.01
+                                value: backend.analogDeadbandStart
+                                enabled: backend.analogDeadbandEnable
+                                onValueModified: backend.setAnalogDeadbandStart(value)
+                            }
+                            Label { text: "End:" }
+                            DoubleSpinBox {
+                                editable: true
+                                from: 0; to: 1; decimals: 3; stepSize: 0.01
+                                value: backend.analogDeadbandEnd
+                                enabled: backend.analogDeadbandEnable
+                                onValueModified: backend.setAnalogDeadbandEnd(value)
+                            }
+                            Label { text: "Level:" }
+                            DoubleSpinBox {
+                                editable: true
+                                from: -1000; to: 1000; decimals: 3; stepSize: 0.1
+                                value: backend.analogDeadbandLevel
+                                enabled: backend.analogDeadbandEnable
+                                onValueModified: backend.setAnalogDeadbandLevel(value)
+                            }
+                            Item { Layout.fillWidth: true }
+                        }
                     }
                 }
             }

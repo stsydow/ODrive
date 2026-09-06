@@ -27,6 +27,8 @@ from odrive.enums import (
     CONTROL_MODE_POSITION_CONTROL,
     CONTROL_MODE_TORQUE_CONTROL,
     CONTROL_MODE_VELOCITY_CONTROL,
+    GPIO_MODE_ANALOG_IN,
+    GPIO_MODE_DIGITAL,
     INPUT_MODE_PASSTHROUGH,
     INPUT_MODE_POS_FILTER,
     INPUT_MODE_TORQUE_RAMP,
@@ -71,6 +73,16 @@ _SETPOINT_TARGETS = {
     CONTROL_MODE_VELOCITY_CONTROL: ("input_vel", "Velocity"),
     CONTROL_MODE_TORQUE_CONTROL: ("input_torque", "Torque"),
     CONTROL_MODE_POSITION_CONTROL: ("input_pos", "Position"),
+}
+
+# Analog input: maps an ADC reading to a controller input endpoint
+# (odrv.config.gpio{N}_analog_mapping, firmware low_level.cpp
+# analog_polling_thread).
+ANALOG_GPIOS = (3, 4)
+_ANALOG_ENDPOINT_ATTR = {
+    CONTROL_MODE_VELOCITY_CONTROL: "_input_vel_property",
+    CONTROL_MODE_TORQUE_CONTROL: "_input_torque_property",
+    CONTROL_MODE_POSITION_CONTROL: "_input_pos_property",
 }
 
 
@@ -175,6 +187,7 @@ class GuiBackend(QObject):
     idleChanged = Signal()  # axisIdle
     logUpdated = Signal()  # a LogEntry was appended
     errorsChanged = Signal()
+    analogChanged = Signal()  # analog mapping state / live mapped value
 
     def __init__(self, verbose=False):
         super().__init__()
@@ -196,6 +209,18 @@ class GuiBackend(QObject):
         self._setpoints = dict.fromkeys(_MODE_ORDER, 0.0)
         self._vel_est_text = "est: -- rps"
         self._pos_est_text = "est: -- rev"
+
+        # Analog input mapping state.
+        self._analog_gpio = 3
+        self._analog_target = "Disabled"
+        self._analog_value = 0.0
+        self._analog_min = 0.0
+        self._analog_max = 0.0
+        self._analog_deadband_available = False
+        self._analog_deadband_enable = False
+        self._analog_deadband_start = 0.0
+        self._analog_deadband_end = 0.0
+        self._analog_deadband_level = 0.0
 
         self.event_log = deque(maxlen=1000)
         self.samples = SampleBuffer()
@@ -274,6 +299,51 @@ class GuiBackend(QObject):
     def posEstimateText(self):
         return self._pos_est_text
 
+    @Property(int, notify=analogChanged)
+    def analogGpio(self):
+        return self._analog_gpio
+
+    @Property(list, constant=True)
+    def analogGpios(self):
+        return list(ANALOG_GPIOS)
+
+    @Property(str, notify=analogChanged)
+    def analogTarget(self):
+        """Target endpoint mode name ('Velocity', 'Position', 'Torque') or 'Disabled'."""
+        return self._analog_target
+
+    @Property(float, notify=analogChanged)
+    def analogValue(self):
+        return self._analog_value
+
+    @Property(float, notify=analogChanged)
+    def analogMin(self):
+        return self._analog_min
+
+    @Property(float, notify=analogChanged)
+    def analogMax(self):
+        return self._analog_max
+
+    @Property(bool, notify=analogChanged)
+    def analogDeadbandAvailable(self):
+        return self._analog_deadband_available
+
+    @Property(bool, notify=analogChanged)
+    def analogDeadbandEnable(self):
+        return self._analog_deadband_enable
+
+    @Property(float, notify=analogChanged)
+    def analogDeadbandStart(self):
+        return self._analog_deadband_start
+
+    @Property(float, notify=analogChanged)
+    def analogDeadbandEnd(self):
+        return self._analog_deadband_end
+
+    @Property(float, notify=analogChanged)
+    def analogDeadbandLevel(self):
+        return self._analog_deadband_level
+
     # -- connection lifecycle ------------------------------------------
 
     @Slot()
@@ -321,6 +391,9 @@ class GuiBackend(QObject):
             logger.warning("on_connected: _on_lost registration failed: %s", e)
 
         self._sync_setpoint_from_device()
+        self._analog_gpio = self._detect_active_gpio()
+        self._load_analog_bounds()
+        self._sync_analog()
         self.status_backend.set_conn("\u25cf Online", "green", True)
         self._config_model.reset()  # re-root the Config Browser (§2.4)
         # Input-mode model is built by the first poll tick (<100 ms away) via
@@ -540,6 +613,213 @@ class GuiBackend(QObject):
             self.logEvent("MODE", f"input mode -> {self._input_modes[index]}")
         except DEVICE_EXCEPTIONS as e:
             self.logEvent("MODE", f"failed to set input mode: {e}")
+
+    # -- analog input mapping ------------------------------------------
+    # Maps an ADC reading to a controller input endpoint via
+    # odrv.config.gpio{N}_analog_mapping (firmware low_level.cpp
+    # analog_polling_thread). While enabled, the mapped setpoint row is
+    # driven by the input: the GUI disables it and mirrors the live value.
+
+    def _detect_active_gpio(self):
+        if self.odrive is None:
+            return 3
+        for gpio in ANALOG_GPIOS:
+            mapping = getattr(
+                self.odrive.config, f"gpio{gpio}_analog_mapping", None
+            )
+            mode = getattr(self.odrive.config, f"gpio{gpio}_mode", None)
+            if mode == GPIO_MODE_ANALOG_IN or (
+                mapping and getattr(mapping, "endpoint", None) is not None
+            ):
+                return gpio
+        return 3
+
+    def _analog_mapping(self):
+        return (
+            getattr(
+                self.odrive.config,
+                f"gpio{self._analog_gpio}_analog_mapping",
+                None,
+            )
+            if self.odrive
+            else None
+        )
+
+    def _analog_match_mode(self, endpoint):
+        """Control mode whose input endpoint `endpoint` refers to, else None."""
+        axis = self._axis()
+        if endpoint is None or axis is None:
+            return None
+        return next(
+            (
+                m
+                for m, a in _ANALOG_ENDPOINT_ATTR.items()
+                if getattr(axis.controller, a, None) is endpoint
+            ),
+            None,
+        )
+
+    def _set_analog_state(self, target, value):
+        if target == self._analog_target and value == self._analog_value:
+            return
+        self._analog_target = target
+        self._analog_value = value
+        self.analogChanged.emit()
+
+    def _sync_analog(self):
+        """Poll: which setpoint the analog GPIO drives + the live mapped value."""
+        mapping = self._analog_mapping()
+        axis = self._axis()
+        if mapping is None or axis is None:
+            self._set_analog_state("Disabled", 0.0)
+            return
+        try:
+            endpoint = mapping.endpoint
+        except (DEVICE_EXCEPTIONS, KeyError, AttributeError):
+            endpoint = None
+        mode = self._analog_match_mode(endpoint)
+        target = MODE_NAMES.get(mode, "Disabled")
+        value = 0.0
+        if mode is not None:
+            raw = getattr(axis.controller, _SETPOINT_TARGETS[mode][0], 0.0)
+            value = float(raw) if raw is not None else 0.0
+        self._set_analog_state(target, value)
+
+    def _load_analog_bounds(self):
+        mapping = self._analog_mapping()
+        if mapping is None:
+            return
+        try:
+            self._analog_min = float(mapping.min)
+            self._analog_max = float(mapping.max)
+            if hasattr(mapping, "deadband_enable"):
+                self._analog_deadband_available = True
+                self._analog_deadband_enable = bool(mapping.deadband_enable)
+                self._analog_deadband_start = float(mapping.deadband_start)
+                self._analog_deadband_end = float(mapping.deadband_end)
+                self._analog_deadband_level = float(mapping.deadband_level)
+            else:
+                self._analog_deadband_available = False
+        except DEVICE_EXCEPTIONS:
+            return
+        self.analogChanged.emit()
+
+    def _write_analog_field(self, attr, value):
+        mapping = self._analog_mapping()
+        if mapping is None or not hasattr(mapping, attr):
+            return
+        try:
+            setattr(mapping, attr, value)
+            setattr(self, f"_analog_{attr}", value)
+            self.logEvent("ANALOG", f"analog {attr} -> {value}")
+            self.analogChanged.emit()
+        except DEVICE_EXCEPTIONS as e:
+            self.logEvent("ANALOG", f"failed to set analog {attr}: {e}")
+
+    @Slot(int)
+    def setAnalogGpio(self, gpio):
+        if gpio not in ANALOG_GPIOS or gpio == self._analog_gpio:
+            return
+        old_gpio = self._analog_gpio
+        self._analog_gpio = gpio
+        if self.odrive is None:
+            self.analogChanged.emit()
+            return
+        old_map = getattr(
+            self.odrive.config, f"gpio{old_gpio}_analog_mapping", None
+        )
+        new_map = getattr(
+            self.odrive.config, f"gpio{gpio}_analog_mapping", None
+        )
+        try:
+            if old_map and new_map and old_map.endpoint is not None:
+                new_map.endpoint = old_map.endpoint
+                new_map.min = old_map.min
+                new_map.max = old_map.max
+                if hasattr(old_map, "deadband_enable") and hasattr(
+                    new_map, "deadband_enable"
+                ):
+                    new_map.deadband_enable = old_map.deadband_enable
+                    new_map.deadband_start = old_map.deadband_start
+                    new_map.deadband_end = old_map.deadband_end
+                    new_map.deadband_level = old_map.deadband_level
+                old_map.endpoint = None
+                setattr(
+                    self.odrive.config, f"gpio{old_gpio}_mode", GPIO_MODE_DIGITAL
+                )
+                setattr(
+                    self.odrive.config, f"gpio{gpio}_mode", GPIO_MODE_ANALOG_IN
+                )
+                self.logEvent(
+                    "ANALOG", f"analog input pin moved to gpio{gpio}"
+                )
+            else:
+                self.logEvent("ANALOG", f"analog input pin -> gpio{gpio}")
+            self._load_analog_bounds()
+            self._sync_analog()
+        except DEVICE_EXCEPTIONS as e:
+            self.logEvent("ANALOG", f"failed to switch analog gpio: {e}")
+
+    @Slot(str)
+    def setAnalogTarget(self, target):
+        """Set analog mapping target: 'Disabled', 'Velocity', 'Position', or 'Torque'."""
+        axis = self._axis()
+        mapping = self._analog_mapping()
+        if axis is None or mapping is None:
+            return
+        mode = MODE_VALUES.get(target)
+        try:
+            if mode is None:
+                mapping.endpoint = None
+                setattr(
+                    self.odrive.config,
+                    f"gpio{self._analog_gpio}_mode",
+                    GPIO_MODE_DIGITAL,
+                )
+                self.logEvent(
+                    "ANALOG", f"analog input disabled (gpio{self._analog_gpio})"
+                )
+                self._sync_setpoint_from_device()
+            else:
+                setattr(
+                    self.odrive.config,
+                    f"gpio{self._analog_gpio}_mode",
+                    GPIO_MODE_ANALOG_IN,
+                )
+                mapping.endpoint = getattr(
+                    axis.controller, _ANALOG_ENDPOINT_ATTR[mode]
+                )
+                self.logEvent(
+                    "ANALOG",
+                    f"analog input -> {target} (gpio{self._analog_gpio})",
+                )
+            self._sync_analog()
+        except DEVICE_EXCEPTIONS as e:
+            self.logEvent("ANALOG", f"failed to set analog mapping: {e}")
+
+    @Slot(float)
+    def setAnalogMin(self, value):
+        self._write_analog_field("min", value)
+
+    @Slot(float)
+    def setAnalogMax(self, value):
+        self._write_analog_field("max", value)
+
+    @Slot(bool)
+    def setAnalogDeadbandEnable(self, value):
+        self._write_analog_field("deadband_enable", value)
+
+    @Slot(float)
+    def setAnalogDeadbandStart(self, value):
+        self._write_analog_field("deadband_start", value)
+
+    @Slot(float)
+    def setAnalogDeadbandEnd(self, value):
+        self._write_analog_field("deadband_end", value)
+
+    @Slot(float)
+    def setAnalogDeadbandLevel(self, value):
+        self._write_analog_field("deadband_level", value)
 
     # -- mode sync / gating --------------------------------------------
 
@@ -858,6 +1138,7 @@ class GuiBackend(QObject):
             ):
                 self.errorsChanged.emit()
             self._read_estimates()
+            self._sync_analog()
         except DEVICE_EXCEPTIONS as e:
             # 0.5.7-hardened: all "link gone" paths raise ObjectLostError, so
             # this catch is uniform. AttributeError/TypeError here would be a

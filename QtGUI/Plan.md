@@ -9,7 +9,8 @@ This document covers the **features and the context for why they exist**:
 
 ---
 ## Working notes — where I left off
-- GPIO curve / filter / dead zone
+-  dead zone -> idle
+- spline GPIO curve /
 - friction feed forward
 - learn kalman filter
 - oscilloscope?
@@ -525,3 +526,18 @@ only the permanent connection/state/error/bus states.
 | All others | Python stdlib | —       | threading, pathlib, dataclasses, csv, json, collections |
 
 ---
+
+## 6. What's Next
+
+### 6.1 Analog Input — row-based redesign (completed)
+
+Row-based split per `ARCHITECTURE.md` §"Analog Input":
+- Target-side directly on setpoint rows: enable checkbox + min + max with native units.
+- Source-side in Settings → "Analog Input" tab: GPIO selector (GPIO 3/4) + deadband fields.
+- Backend projects active mapping to {gpio, target, min, max, deadband}, IDLE-gated.
+
+### 6.2 Optional
+
+- `CONTEXT.md` glossary with the settled vocabulary (pedal target / pedal source / enabled
+  = endpoint set / driven row) — terms are agreed, file not yet written.
+

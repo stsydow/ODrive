@@ -6,6 +6,8 @@ from odrive.enums import (
     CONTROL_MODE_POSITION_CONTROL,
     CONTROL_MODE_TORQUE_CONTROL,
     CONTROL_MODE_VELOCITY_CONTROL,
+    GPIO_MODE_ANALOG_IN,
+    GPIO_MODE_DIGITAL,
     INPUT_MODE_PASSTHROUGH,
     INPUT_MODE_VEL_RAMP,
 )
@@ -172,6 +174,93 @@ def test_object_lost_tick_drops_link_once(backend):
     backend.plotTick()
     assert backend.odrive is None and len(hits) == 1
     backend.plotTick()  # offline now: must early-return silently
+
+
+def test_analog_sync_reads_mapping_and_live_value(backend):
+    axis = backend.odrive.axis0
+    mapping = backend.odrive.config.gpio3_analog_mapping
+    mapping.endpoint = axis.controller._input_vel_property
+    mapping.min = -1.7
+    mapping.max = 30.0
+    axis.controller.input_vel = 5.5
+    backend._load_analog_bounds()
+    backend._sync_analog()
+    assert backend.analogTarget == "Velocity"
+    assert backend.analogValue == 5.5
+    assert backend.analogMin == -1.7
+    assert backend.analogMax == 30.0
+
+
+def test_analog_disabled_when_no_endpoint(backend):
+    backend.odrive.config.gpio3_analog_mapping.endpoint = None
+    backend._sync_analog()
+    assert backend.analogTarget == "Disabled"
+    assert backend.analogValue == 0.0
+
+
+def test_set_analog_target_enables_and_disables(backend):
+    axis = backend.odrive.axis0
+    cfg = backend.odrive.config
+    mapping = cfg.gpio3_analog_mapping
+    backend.setAnalogTarget("Velocity")
+    assert cfg.gpio3_mode == GPIO_MODE_ANALOG_IN
+    assert mapping.endpoint is axis.controller._input_vel_property
+    assert backend.analogTarget == "Velocity"
+    # While analog input drove velocity, input_vel changed to 18.0
+    axis.controller.input_vel = 18.0
+    backend.setAnalogTarget("Disabled")
+    assert cfg.gpio3_mode == GPIO_MODE_DIGITAL
+    assert mapping.endpoint is None
+    assert backend.analogTarget == "Disabled"
+    # Setpoints must be re-synced from device on disable
+    assert backend.velSetpoint == 18.0
+
+
+def test_set_analog_bounds_writes_device(backend):
+    backend.setAnalogMin(-2.5)
+    backend.setAnalogMax(40.0)
+    mapping = backend.odrive.config.gpio3_analog_mapping
+    assert mapping.min == -2.5
+    assert mapping.max == 40.0
+    assert backend.analogMin == -2.5
+    assert backend.analogMax == 40.0
+
+
+def test_switch_analog_gpio_moves_mapping(backend):
+    axis = backend.odrive.axis0
+    cfg = backend.odrive.config
+    backend.setAnalogTarget("Velocity")
+    backend.setAnalogMin(-10.0)
+    backend.setAnalogMax(10.0)
+    assert cfg.gpio3_mode == GPIO_MODE_ANALOG_IN
+    assert cfg.gpio3_analog_mapping.endpoint is axis.controller._input_vel_property
+
+    # Switch from GPIO 3 to GPIO 4
+    backend.setAnalogGpio(4)
+    assert backend.analogGpio == 4
+    assert cfg.gpio3_mode == GPIO_MODE_DIGITAL
+    assert cfg.gpio3_analog_mapping.endpoint is None
+    assert cfg.gpio4_mode == GPIO_MODE_ANALOG_IN
+    assert cfg.gpio4_analog_mapping.endpoint is axis.controller._input_vel_property
+    assert cfg.gpio4_analog_mapping.min == -10.0
+    assert cfg.gpio4_analog_mapping.max == 10.0
+
+
+def test_analog_deadband_controls(backend):
+    mapping = backend.odrive.config.gpio3_analog_mapping
+    assert backend.analogDeadbandAvailable is True
+    backend.setAnalogDeadbandEnable(True)
+    backend.setAnalogDeadbandStart(0.4)
+    backend.setAnalogDeadbandEnd(0.6)
+    backend.setAnalogDeadbandLevel(0.0)
+    assert mapping.deadband_enable is True
+    assert mapping.deadband_start == 0.4
+    assert mapping.deadband_end == 0.6
+    assert mapping.deadband_level == 0.0
+    assert backend.analogDeadbandEnable is True
+    assert backend.analogDeadbandStart == 0.4
+    assert backend.analogDeadbandEnd == 0.6
+    assert backend.analogDeadbandLevel == 0.0
 
 
 def test_unexpected_error_surfaces_and_keeps_link(backend):
