@@ -255,9 +255,11 @@ be a firmware project, not a GUI feature.
 
 ## Exception Handling
 
-Device reads/writes catch only `DEVICE_EXCEPTIONS`. Never blanket-swallow `Exception`. `sys.path` bootstrap for
-`tools/odrive` + `pyfibre` is kept as bare inline `sys.path.insert` calls before imports
-(rules require the bare form — an intermediate assignment trips ruff's E402).
+Device reads/writes catch only `DEVICE_EXCEPTIONS`. Never blanket-swallow `Exception`.
+
+- **Unpack tuple in compound catches**: When combining `DEVICE_EXCEPTIONS` with other exception types (e.g. `AttributeError` or `KeyError`), always use `(*DEVICE_EXCEPTIONS, AttributeError)`. A nested tuple `(DEVICE_EXCEPTIONS, AttributeError)` causes Python to throw `TypeError: catching classes that do not inherit from BaseException is not allowed`.
+- **NVM save reboot lifecycle**: ODrive v3 saves configuration by committing to flash and immediately triggering a hardware reset. Host code in `saveConfig` and `savePreCalibrated` must absorb the resulting `ObjectLostError` / disconnect as an expected success rather than a write failure.
+- **`sys.path` bootstrap**: imports for `tools/odrive` + `pyfibre` are kept as bare inline `sys.path.insert` calls before imports (the bare form avoids ruff's E402).
 
 ## Adding a New Feature
 
