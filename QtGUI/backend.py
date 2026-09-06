@@ -687,7 +687,7 @@ class GuiBackend(QObject):
             return
         try:
             endpoint = mapping.endpoint
-        except (DEVICE_EXCEPTIONS, KeyError, AttributeError):
+        except (*DEVICE_EXCEPTIONS, KeyError, AttributeError):
             endpoint = None
         mode = self._analog_match_mode(endpoint)
         target = MODE_NAMES.get(mode, "Disabled")

@@ -279,3 +279,17 @@ def test_unexpected_error_surfaces_and_keeps_link(backend):
     with pytest.raises(TypeError):
         backend.plotTick()
     assert backend.odrive is not None  # link stays up
+
+
+def test_device_exceptions_caught_during_read_error_report():
+    from errors import DEVICE_EXCEPTIONS, read_error_report
+
+    class DisappearingDevice:
+        error = 0
+
+        @property
+        def axis0(self):
+            raise DEVICE_EXCEPTIONS[0]()
+
+    report = read_error_report(DisappearingDevice())
+    assert report.any is False
