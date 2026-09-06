@@ -58,12 +58,12 @@ device appears.
 
 ### Menus
 
-- **Device** — Save Config, Export/Import Config, Reboot, Errors (decoded, with Clear),
-  Device Info.
+- **Device** — Save Config, Save as Pre-Calibrated…, Export/Import Config, Reboot,
+  Errors (decoded, with Clear), Device Info.
 - **Debug** — Verbose Logging, Event Log…, Force Reconnect, Live Plot…
 
-The Errors dialog is also opened by clicking the `Err:` field in the status footer. The
-Error, Device Info, and Event Log dialogs are separate movable windows.
+The Errors dialog is also opened by clicking the unified status badge when an error is
+present. The Error, Device Info, and Event Log dialogs are separate movable windows.
 
 ### Debugging
 

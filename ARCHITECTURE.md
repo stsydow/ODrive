@@ -33,6 +33,7 @@ This document captures the project's architecture for future reference.
 - **`Controller`** (`controller.hpp`): Velocity/position/current control modes with trajectory tracking.
 - **`Encoder`** (`encoder.hpp`): Handles incremental, absolute, and Hall sensor encoders.
 - **`FOC`** (`foc.hpp`): Field-oriented control (Park/Inverse Park transforms).
+- **`PWMMapping_t`** (`odrive_main.h`, `low_level.cpp`, `pwm_input.cpp`): ADC and PWM input mapping with deadband support, `deadband_idle` mode (freewheeling handwheel when in deadband), and safety arming latch.
 - **Component hierarchy** (`component.hpp`): Hierarchical task scheduling with priority-based execution in the control loop.
 - **`ConfigManager`** (`nvm_config.hpp`): Non-volatile configuration persistence.
 
@@ -73,6 +74,7 @@ Firmware (ODrive → Axis → Motor)
 - **Interface-driven code generation**: `odrive-interface.yaml` is the single source of truth for the public API. C++ and Python bindings are generated, avoiding drift.
 - **QtGUI never keeps device sub-objects (QtGUI/)**. The connected root is stored as `self.odrive`; `axis0`/`motor`/`encoder`/`controller` are derived per use and never cached, so a stale reference can't outlive a disconnect. `safe_getattr` is used only to reach/guard `axis0` — the one level absent on an empty/disconnected object — because once connected the tree below `axis0` is fully populated and read with plain attribute access. Disconnect detection relies on `_on_lost` plus reads that surface `ObjectLostError` (via `_read_value`) into the reconnect counter.
 - **The ODrive object tree is statically defined, not optional (`Firmware/odrive-interface.yaml`).** The YAML is the single source of truth for the exposed tree (see `tools/fibre-tools/interface_generator.py`), and it contains no conditional/optional markers — for a given firmware build every object and attribute (`motor`, `controller`, `encoder`, `sensorless_estimator`, version fields, config flags) is always present. So the GUI treats the tree as fully populated when connected. The only two real sources of absence are:**(a)** disconnect (the empty `odrive` object — handled by the `axis0` guard above) and **(b)** firmware-version drift, where an attribute added/removed across releases is gated with `hasattr(obj.config, attr)` (see `QtGUI/controls.py`) rather than `safe_getattr`. Guarded reads that are redundant after a presence check — e.g. `safe_getattr(obj.config, x)` after `hasattr` — are avoided.
+- **Configuration backup/restore persistence (`tools/odrive/configuration.py`)**: Endpoints are restored from path strings to `RemoteObject` instances via `path_to_obj()`, non-finite floats serialize as valid JSON strings (`Infinity`, `-Infinity`, `NaN`) to preserve limits without `NoneType` codec errors, and read-only attributes without `exchange` (such as `anticogging` metrics) are skipped cleanly during restore.
 - **Component hierarchy**: Motor control components are organized in a tree with priority-based scheduling, enabling modular extension of the control loop.
 - **FreeRTOS**: Preemptive multitasking with separate tasks for USB IRQ, UART, CAN, and the main control loop.
 

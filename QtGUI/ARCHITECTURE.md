@@ -44,12 +44,12 @@ QtGUI/
 ├── errors.py      # Error decode (read_error_report) + text formatting (pure logic)
 ├── eventlog.py    # In-memory event log + formatting (LogEntry/format_log, pure logic)
 ├── monitoring.py  # Live plot: channel registry + SampleBuffer + pyqtgraph PlotWindow
-├── status_backend.py # StatusBackend(QObject): status-footer state (conn/state/errors/VBus/Power)
+├── status_backend.py # StatusBackend(QObject): unified status badge, decoded errors, VBus/Power
 ├── qml/
 │   ├── main.qml            # ApplicationWindow: menubar, control bar, footer, command, settings
 │   ├── SetpointRow.qml     # reusable Control Command setpoint row (DoubleSpinBox)
 │   ├── SpinRow.qml / CheckRow.qml   # reusable settings rows (feature-gated; limits tabs gate via enabled)
-│   ├── StatusBar.qml       # footer status bar (connection/state/error/VBus/power fields)
+│   ├── StatusBar.qml       # footer status bar (unified status badge + VBus/power fields)
 │   └── ErrorDialog / EventLogDialog / DeviceInfoDialog / ConfigBrowserDialog.qml  # Window dialogs
 ├── tests/         # headless pytest suite (offscreen, mock ODrive)
 ├── ruff.toml / check.sh   # lint config + static-check + test runner
@@ -100,7 +100,8 @@ Qt objects (the QML window and the backend) are only ever touched from the main 
 so QML accesses it by name everywhere (menus, rows, dialogs); a second context property
 `statusBackend` (owned by `GuiBackend`) backs the status footer. The contract:
 
-- **Properties** — connection + status footer (`connected`, `connText`, `connColor`,
+- **Properties** — unified status badge (`statusText`, `statusColor`, `hasError`),
+  connection + status footer legacy compatibility (`connected`, `connText`, `connColor`,
   `stateText`, `errorText`, `errorColor`, `vbusText`, `powerText`) live on the
   `statusBackend` context property; control command (`currentMode`, `inputModes`,
   `currentInputMode`, three setpoint values, two estimate labels) and `closedLoop`
@@ -111,8 +112,8 @@ so QML accesses it by name everywhere (menus, rows, dialogs); a second context p
   `logText`) is a live-bound property updated on the relevant change signal.
 - **Slots** — `run()`, `stop()`, `startState(name)`, `setMode(name)`,
   `setInputMode(idx)`, `setActiveSetpoint(v)`, `applySetpoint()`, `setConfig/getConfig/hasConfig`,
-  `save/export/importConfig`, `reboot`, `clearErrors`, `exportLog`, `deviceInfoText`,
-  `setVerbose`.
+  `saveConfig`, `savePreCalibrated`, `export/importConfig`, `reboot`, `clearErrors`, `exportLog`,
+  `deviceInfoText`, `setVerbose`.
 - **Sync, not write-through** — a setpoint row's `DoubleSpinBox` is *not* bound to the
   device; user edits stay local (`setActiveSetpoint`) and reach the device only on
   `applySetpoint()` / Enter. The box re-syncs from `backend` on the setpoint-changed
@@ -159,10 +160,14 @@ GUI split by parameter dependence:
   mapped value.
 - **Input source** (parameter-independent) → **Settings → "Analog Input" tab**: GPIO
   selector (fixed list 3/4, the ADC-capable pins) + deadband fields (guarded — the
-  firmware properties may be absent on older fw).
+  firmware properties may be absent on older fw) + "Idle in deadband" toggle.
 - All mapping writes are board-level → **IDLE-gated** like the limits tabs. The device's
   `analog_mappings[active_gpio]` is the source of truth; the backend projects it to
   {active_gpio, target row, min, max, deadband} and polls the live mapped value.
+- **Deadband Idle + Safety Arm Latch**: in firmware, `deadband_idle` transitions the axis
+  to `AXIS_STATE_IDLE` in deadband (freewheeling handwheel, cold FETs) and re-engages
+  `CLOSED_LOOP_CONTROL` when pressed. A firmware-level safety latch requires explicit arming
+  (manual run or `startup_closed_loop_control`), and disarms immediately on any error or manual stop.
 
 Status: row-based split implemented. One active input mapping at a time; other
 sensors/control lines may reuse the source side.
@@ -184,7 +189,9 @@ cheap at the measured ~4 kHz sequential link rate (`bench_poll_rate.py`, Plan §
 | **States execute only via button** | Selecting a dropdown item just sets the selection; only Start/Execute actually commands the device — browsing can't accidentally start a calibration. |
 | **Confirmed setpoint apply** | Spinboxes never write on change; the active setpoint goes to the device only on Apply / Enter. |
 | **UI gating on connect** | The whole Control Command group and Settings tab are `enabled: statusBackend.connected`. Setpoints stay editable in Idle on purpose: pre-setting a velocity before Run is the point, and writing `input_*` while idle moves nothing. |
-| **Status footer pinned to window bottom** | `ApplicationWindow.footer` holds the composed connect/state/error/VBus/power bar (like the old `QStatusBar`), keeping the main area focused. |
+| **Status footer pinned to window bottom** | `ApplicationWindow.footer` holds the composed status bar (unified status badge + VBus/power), keeping the main area focused. |
+| **Unified status badge with error decode** | Merges connection, axis state, and error into one high-signal status indicator (`Connecting` / `Error: <NAME>` / `Idle (Armed/Disarmed)` / `Running` / `Calibration...`). Errors decode bitmasks into human-readable strings and clicking opens the Error dialog. |
+| **Expected reboot absorption on NVM save** | `saveConfig` and `savePreCalibrated` absorb the expected `ObjectLostError` when ODrive v3 saves to flash and reboots, marking status as `Rebooting…` without false-alarm error dialogs. |
 | **Dialogs as top-level `Window`s** | Error, Event Log, and Device Info are separate Qt Quick `Window`s (native title bar, movable/resizable) sized to their content layout — not frameless popups. File dialogs stay native `QFileDialog`. |
 | **Event log, non-modal + live** | `logEvent` records device-side history (connect/state/mode/setpoint/error/clear) so a run-up to an error is visible, even offline. The viewer binds `backend.logText` live via the `logUpdated` signal (no polling), and works while disconnected. |
 | **No transient status-bar messages** | Action feedback and write failures go to the event log (persistent context), not ephemeral status messages. |
