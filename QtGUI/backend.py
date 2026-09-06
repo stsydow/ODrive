@@ -917,6 +917,8 @@ class GuiBackend(QObject):
             return None
         if base == "odrive":
             return self.odrive
+        if base == "axis":
+            return axis
         return getattr(axis, base, None)
 
     # -- config browser (Plan §2.4) --------------------------------------
@@ -977,10 +979,14 @@ class GuiBackend(QObject):
     def saveConfig(self):
         if self.odrive is None:
             return
+        self.status_backend.set_conn("\u25cf Rebooting\u2026", "orange", False)
         try:
-            self.odrive.save_configuration()
+            try:
+                self.odrive.save_configuration()
+            except (*DEVICE_EXCEPTIONS, AttributeError):
+                pass  # Saving configuration reboots the device on ODrive v3
             self.logEvent("CFG", "saved config to NVM")
-        except DEVICE_EXCEPTIONS as e:
+        except (*DEVICE_EXCEPTIONS, AttributeError) as e:
             QMessageBox.critical(
                 None, "Save Error", f"Failed to save configuration: {e}"
             )

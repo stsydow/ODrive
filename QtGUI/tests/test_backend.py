@@ -328,3 +328,25 @@ def test_save_pre_calibrated_cancelled(backend, monkeypatch):
 
     assert backend.odrive.axis0.motor.config.pre_calibrated is False
     assert len(saved) == 0
+
+
+def test_save_config_handles_reboot_disconnect(backend):
+    from errors import DEVICE_EXCEPTIONS
+
+    def boom():
+        raise DEVICE_EXCEPTIONS[0]()
+
+    backend.odrive.save_configuration = boom
+    backend.saveConfig()
+    assert any(
+        e.category == "CFG" and "saved config" in e.message
+        for e in backend.event_log
+    )
+
+
+def test_axis_config_startup_closed_loop(backend):
+    assert backend.hasConfig("axis", "startup_closed_loop_control") is True
+    assert backend.getConfig("axis", "startup_closed_loop_control") == 0.0
+    backend.setConfig("axis", "startup_closed_loop_control", True)
+    assert backend.odrive.axis0.config.startup_closed_loop_control is True
+    assert backend.getConfig("axis", "startup_closed_loop_control") == 1.0
