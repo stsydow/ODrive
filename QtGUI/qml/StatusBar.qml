@@ -14,21 +14,13 @@ Rectangle {
         spacing: 14
 
         Label {
-            text: statusBackend.connText
+            text: statusBackend.statusText
             font.bold: true
-            color: statusBackend.connColor
-        }
-
-        Label {
-            text: statusBackend.stateText
-        }
-
-        Label {
-            text: statusBackend.errorText
-            color: statusBackend.errorColor
+            color: statusBackend.statusColor
             MouseArea {
                 anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
+                enabled: statusBackend.hasError
+                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: errorDialog.show()
             }
         }

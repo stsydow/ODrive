@@ -120,9 +120,11 @@ def _torque_reader(axis, _odrv):
 def _adc_reader(gpio):
     """Analog input on `gpio` as 0-1 fraction of 3.3 V.
     gpio=3 is live today; gpio=4 uses the same analog mode when needed."""
+
     def read(_axis, odrv):
         fn = getattr(odrv, "get_adc_voltage", None)
         return float(fn(gpio)) / 3.3 if fn else math.nan
+
     return read
 
 
@@ -222,6 +224,7 @@ class GuiBackend(QObject):
         self._analog_deadband_end = 0.0
         self._analog_deadband_level = 0.0
         self._analog_deadband_idle = False
+        self._armed = False
 
         self.event_log = deque(maxlen=1000)
         self.samples = SampleBuffer()
@@ -310,7 +313,7 @@ class GuiBackend(QObject):
 
     @Property(str, notify=analogChanged)
     def analogTarget(self):
-        """Target endpoint mode name ('Velocity', 'Position', 'Torque') or 'Disabled'."""
+        """Target endpoint mode ('Velocity', 'Position', 'Torque') or 'Disabled'."""
         return self._analog_target
 
     @Property(float, notify=analogChanged)
@@ -399,6 +402,10 @@ class GuiBackend(QObject):
         self._analog_gpio = self._detect_active_gpio()
         self._load_analog_bounds()
         self._sync_analog()
+        axis = self._axis()
+        self._armed = bool(
+            getattr(getattr(axis, "config", None), "startup_closed_loop_control", False)
+        )
         self.status_backend.set_conn("\u25cf Online", "green", True)
         self._config_model.reset()  # re-root the Config Browser (§2.4)
         # Input-mode model is built by the first poll tick (<100 ms away) via
@@ -448,6 +455,7 @@ class GuiBackend(QObject):
         except DEVICE_EXCEPTIONS as e:
             self.logEvent("STATE", f"failed to run: {e}")
             return
+        self._armed = True
         self._sync_setpoint_from_device()
         self.logEvent("STATE", "Run: Closed Loop")
 
@@ -461,6 +469,7 @@ class GuiBackend(QObject):
         except DEVICE_EXCEPTIONS as e:
             self.logEvent("STATE", f"failed to stop: {e}")
             return
+        self._armed = False
         self.logEvent("STATE", "Stop: Idle")
 
     @Slot(str)
@@ -629,9 +638,7 @@ class GuiBackend(QObject):
         if self.odrive is None:
             return 3
         for gpio in ANALOG_GPIOS:
-            mapping = getattr(
-                self.odrive.config, f"gpio{gpio}_analog_mapping", None
-            )
+            mapping = getattr(self.odrive.config, f"gpio{gpio}_analog_mapping", None)
             mode = getattr(self.odrive.config, f"gpio{gpio}_mode", None)
             if mode == GPIO_MODE_ANALOG_IN or (
                 mapping and getattr(mapping, "endpoint", None) is not None
@@ -703,7 +710,9 @@ class GuiBackend(QObject):
                 self._analog_deadband_start = float(mapping.deadband_start)
                 self._analog_deadband_end = float(mapping.deadband_end)
                 self._analog_deadband_level = float(mapping.deadband_level)
-                self._analog_deadband_idle = bool(getattr(mapping, "deadband_idle", False))
+                self._analog_deadband_idle = bool(
+                    getattr(mapping, "deadband_idle", False)
+                )
             else:
                 self._analog_deadband_available = False
         except DEVICE_EXCEPTIONS:
@@ -731,12 +740,8 @@ class GuiBackend(QObject):
         if self.odrive is None:
             self.analogChanged.emit()
             return
-        old_map = getattr(
-            self.odrive.config, f"gpio{old_gpio}_analog_mapping", None
-        )
-        new_map = getattr(
-            self.odrive.config, f"gpio{gpio}_analog_mapping", None
-        )
+        old_map = getattr(self.odrive.config, f"gpio{old_gpio}_analog_mapping", None)
+        new_map = getattr(self.odrive.config, f"gpio{gpio}_analog_mapping", None)
         try:
             if old_map and new_map and old_map.endpoint is not None:
                 new_map.endpoint = old_map.endpoint
@@ -749,18 +754,14 @@ class GuiBackend(QObject):
                     new_map.deadband_start = old_map.deadband_start
                     new_map.deadband_end = old_map.deadband_end
                     new_map.deadband_level = old_map.deadband_level
-                    if hasattr(old_map, "deadband_idle") and hasattr(new_map, "deadband_idle"):
+                    if hasattr(old_map, "deadband_idle") and hasattr(
+                        new_map, "deadband_idle"
+                    ):
                         new_map.deadband_idle = old_map.deadband_idle
                 old_map.endpoint = None
-                setattr(
-                    self.odrive.config, f"gpio{old_gpio}_mode", GPIO_MODE_DIGITAL
-                )
-                setattr(
-                    self.odrive.config, f"gpio{gpio}_mode", GPIO_MODE_ANALOG_IN
-                )
-                self.logEvent(
-                    "ANALOG", f"analog input pin moved to gpio{gpio}"
-                )
+                setattr(self.odrive.config, f"gpio{old_gpio}_mode", GPIO_MODE_DIGITAL)
+                setattr(self.odrive.config, f"gpio{gpio}_mode", GPIO_MODE_ANALOG_IN)
+                self.logEvent("ANALOG", f"analog input pin moved to gpio{gpio}")
             else:
                 self.logEvent("ANALOG", f"analog input pin -> gpio{gpio}")
             self._load_analog_bounds()
@@ -770,7 +771,7 @@ class GuiBackend(QObject):
 
     @Slot(str)
     def setAnalogTarget(self, target):
-        """Set analog mapping target: 'Disabled', 'Velocity', 'Position', or 'Torque'."""
+        """Set analog mapping target: 'Disabled', 'Velocity', etc."""
         axis = self._axis()
         mapping = self._analog_mapping()
         if axis is None or mapping is None:
@@ -794,9 +795,7 @@ class GuiBackend(QObject):
                     f"gpio{self._analog_gpio}_mode",
                     GPIO_MODE_ANALOG_IN,
                 )
-                mapping.endpoint = getattr(
-                    axis.controller, _ANALOG_ENDPOINT_ATTR[mode]
-                )
+                mapping.endpoint = getattr(axis.controller, _ANALOG_ENDPOINT_ATTR[mode])
                 self.logEvent(
                     "ANALOG",
                     f"analog input -> {target} (gpio{self._analog_gpio})",
@@ -1145,8 +1144,18 @@ class GuiBackend(QObject):
         try:
             self._sync_mode()
             self._sync_closed_loop()
+            axis = self._axis()
+            if axis is not None:
+                if axis.current_state == AXIS_STATE_CLOSED_LOOP_CONTROL:
+                    self._armed = True
+                elif getattr(axis, "error", 0) != 0:
+                    self._armed = False
             if self.status_backend.update_readings(
-                self.odrive, self._axis(), self.logEvent
+                self.odrive,
+                axis,
+                self.logEvent,
+                self._armed,
+                self._analog_deadband_idle,
             ):
                 self.errorsChanged.emit()
             self._read_estimates()
