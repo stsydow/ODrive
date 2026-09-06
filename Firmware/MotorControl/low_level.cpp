@@ -383,6 +383,84 @@ void update_brake_current() {
 }
 
 
+Axis* get_axis_from_endpoint(endpoint_ref_t endpoint_ref) {
+    void* ptr = fibre::get_endpoint_ctx(endpoint_ref);
+    if (!ptr) return nullptr;
+    uintptr_t p = (uintptr_t)ptr;
+    for (size_t i = 0; i < AXIS_COUNT; ++i) {
+        if (p >= (uintptr_t)&axes[i] && p < (uintptr_t)(&axes[i] + 1))
+            return &axes[i];
+        if (p >= (uintptr_t)&axes[i].controller_ && p < (uintptr_t)(&axes[i].controller_ + 1))
+            return &axes[i];
+        if (p >= (uintptr_t)&axes[i].motor_ && p < (uintptr_t)(&axes[i].motor_ + 1))
+            return &axes[i];
+        if (p >= (uintptr_t)&axes[i].encoder_ && p < (uintptr_t)(&axes[i].encoder_ + 1))
+            return &axes[i];
+        if (p >= (uintptr_t)&axes[i].sensorless_estimator_ && p < (uintptr_t)(&axes[i].sensorless_estimator_ + 1))
+            return &axes[i];
+        if (p >= (uintptr_t)&axes[i].trap_traj_ && p < (uintptr_t)(&axes[i].trap_traj_ + 1))
+            return &axes[i];
+    }
+    return nullptr;
+}
+
+void apply_mapping_deadband_idle(const struct PWMMapping_t *map, float fraction) {
+    if (!map->deadband_idle) {
+        return;
+    }
+    Axis* axis = get_axis_from_endpoint(map->endpoint);
+    if (!axis || axis->axis_num_ < 0 || axis->axis_num_ >= (int)AXIS_COUNT) {
+        return;
+    }
+
+    static bool deadband_armed[AXIS_COUNT] = { false };
+    static bool deadband_idled_by_us[AXIS_COUNT] = { false };
+
+    size_t idx = (size_t)axis->axis_num_;
+
+    // If an error occurred, disarm the latch immediately
+    if (axis->error_ != Axis::ERROR_NONE) {
+        deadband_armed[idx] = false;
+        deadband_idled_by_us[idx] = false;
+        return;
+    }
+
+    // If the user or another source requested IDLE, disarm the latch
+    if (axis->requested_state_ == Axis::AXIS_STATE_IDLE && !deadband_idled_by_us[idx]) {
+        deadband_armed[idx] = false;
+        return;
+    }
+
+    // When the axis enters closed loop control (user armed or startup), activate the latch
+    if (axis->current_state_ == Axis::AXIS_STATE_CLOSED_LOOP_CONTROL) {
+        deadband_armed[idx] = true;
+        deadband_idled_by_us[idx] = false;
+    }
+
+    // If not armed, pedal will not auto-engage
+    if (!deadband_armed[idx]) {
+        return;
+    }
+
+    bool in_deadband = map->deadband_enable &&
+        (map->deadband_start <= 0.0f ? fraction <= map->deadband_end
+                                     : (fraction >= map->deadband_start && fraction <= map->deadband_end));
+
+    if (in_deadband) {
+        if (axis->current_state_ != Axis::AXIS_STATE_IDLE && axis->requested_state_ == Axis::AXIS_STATE_UNDEFINED) {
+            deadband_idled_by_us[idx] = true;
+            axis->requested_state_ = Axis::AXIS_STATE_IDLE;
+        }
+    } else {
+        if (axis->current_state_ == Axis::AXIS_STATE_IDLE && axis->requested_state_ == Axis::AXIS_STATE_UNDEFINED) {
+            if (axis->motor_.is_calibrated_) {
+                deadband_idled_by_us[idx] = false;
+                axis->requested_state_ = Axis::AXIS_STATE_CLOSED_LOOP_CONTROL;
+            }
+        }
+    }
+}
+
 /* Analog speed control input */
 
 static void update_analog_endpoint(const struct PWMMapping_t *map, int gpio)
@@ -396,6 +474,7 @@ static void update_analog_endpoint(const struct PWMMapping_t *map, int gpio)
         map->deadband_end, map->deadband_level
     );
     fibre::set_endpoint_from_float(map->endpoint, value);
+    apply_mapping_deadband_idle(map, fraction);
 }
 
 static void analog_polling_thread(void *)

@@ -85,6 +85,16 @@ bool set_endpoint_from_float(endpoint_ref_t endpoint_ref, float value) {
     return type_info && type_info->set_float(property, value);
 }
 
+void* get_endpoint_ctx(endpoint_ref_t endpoint_ref) {
+    if (endpoint_ref.json_crc != json_crc_) {
+        return nullptr;
+    }
+
+    Introspectable property{};
+    get_property(property, endpoint_ref.endpoint_id);
+    return *(void**)&property.storage_;
+}
+
 }
 
 #pragma GCC pop_options

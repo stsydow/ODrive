@@ -253,6 +253,13 @@ ApplicationWindow {
                             visible: backend.analogDeadbandAvailable
                             onToggled: backend.setAnalogDeadbandEnable(checked)
                         }
+                        CheckBox {
+                            text: "Idle in deadband (disengage motor)"
+                            checked: backend.analogDeadbandIdle
+                            visible: backend.analogDeadbandAvailable
+                            enabled: backend.analogDeadbandEnable
+                            onToggled: backend.setAnalogDeadbandIdle(checked)
+                        }
                         RowLayout {
                             visible: backend.analogDeadbandAvailable
                             Label { text: "Deadband Start:" }

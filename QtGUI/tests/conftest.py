@@ -94,6 +94,7 @@ class MockGpioMapping:
         self.deadband_start = 0.0
         self.deadband_end = 0.0
         self.deadband_level = 0.0
+        self.deadband_idle = False
 
 
 class MockAxis:

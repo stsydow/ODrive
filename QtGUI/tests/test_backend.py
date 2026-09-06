@@ -253,14 +253,17 @@ def test_analog_deadband_controls(backend):
     backend.setAnalogDeadbandStart(0.4)
     backend.setAnalogDeadbandEnd(0.6)
     backend.setAnalogDeadbandLevel(0.0)
+    backend.setAnalogDeadbandIdle(True)
     assert mapping.deadband_enable is True
     assert mapping.deadband_start == 0.4
     assert mapping.deadband_end == 0.6
     assert mapping.deadband_level == 0.0
+    assert mapping.deadband_idle is True
     assert backend.analogDeadbandEnable is True
     assert backend.analogDeadbandStart == 0.4
     assert backend.analogDeadbandEnd == 0.6
     assert backend.analogDeadbandLevel == 0.0
+    assert backend.analogDeadbandIdle is True
 
 
 def test_unexpected_error_surfaces_and_keeps_link(backend):
