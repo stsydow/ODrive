@@ -293,3 +293,38 @@ def test_device_exceptions_caught_during_read_error_report():
 
     report = read_error_report(DisappearingDevice())
     assert report.any is False
+
+
+def test_save_pre_calibrated(backend, monkeypatch):
+    from odrive.enums import AXIS_STATE_CLOSED_LOOP_CONTROL, AXIS_STATE_IDLE
+    from PySide6.QtWidgets import QMessageBox
+
+    saved = []
+    backend.odrive.save_configuration = lambda: saved.append(1)
+    backend.odrive.axis0.current_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+    backend.odrive.axis0.motor.config.pre_calibrated = False
+    backend.odrive.axis0.encoder.config.pre_calibrated = False
+
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+    backend.savePreCalibrated()
+
+    assert backend.odrive.axis0.requested_state == AXIS_STATE_IDLE
+    assert backend.odrive.axis0.motor.config.pre_calibrated is True
+    assert backend.odrive.axis0.encoder.config.pre_calibrated is True
+    assert len(saved) == 1
+    assert any(
+        e.category == "CFG" and "pre_calibrated" in e.message
+        for e in backend.event_log
+    )
+
+
+def test_save_pre_calibrated_cancelled(backend, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    saved = []
+    backend.odrive.save_configuration = lambda: saved.append(1)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.No)
+    backend.savePreCalibrated()
+
+    assert backend.odrive.axis0.motor.config.pre_calibrated is False
+    assert len(saved) == 0

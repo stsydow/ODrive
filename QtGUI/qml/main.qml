@@ -20,6 +20,7 @@ ApplicationWindow {
         Menu {
             title: "&Device"
             MenuItem { text: "&Save Config"; onTriggered: backend.saveConfig() }
+            MenuItem { text: "Save as &Pre-Calibrated…"; onTriggered: backend.savePreCalibrated() }
             MenuItem { text: "&Export Config…"; onTriggered: backend.exportConfig() }
             MenuItem { text: "&Import Config…"; onTriggered: backend.importConfig() }
             MenuSeparator {}

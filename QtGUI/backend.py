@@ -986,6 +986,43 @@ class GuiBackend(QObject):
             )
 
     @Slot()
+    def savePreCalibrated(self):
+        """Put axis in Idle, mark motor & encoder pre_calibrated, and save to NVM."""
+        if self.odrive is None:
+            return
+        axis = self._axis()
+        if axis is None:
+            return
+
+        reply = QMessageBox.question(
+            None,
+            "Save Pre-Calibrated",
+            "Put axis in Idle, mark motor and encoder as pre-calibrated, "
+            "and save to NVM?\n\n"
+            "The device will reboot with the saved calibration.",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            axis.requested_state = AXIS_STATE_IDLE
+            self._armed = False
+            axis.motor.config.pre_calibrated = True
+            axis.encoder.config.pre_calibrated = True
+            self.logEvent("CFG", "marked motor & encoder pre_calibrated = True")
+            self.status_backend.set_conn("\u25cf Rebooting\u2026", "orange", False)
+            try:
+                self.odrive.save_configuration()
+            except (*DEVICE_EXCEPTIONS, AttributeError):
+                pass  # Device rebooting on save
+            self.logEvent("CFG", "saved config to NVM")
+        except (*DEVICE_EXCEPTIONS, AttributeError) as e:
+            QMessageBox.critical(
+                None, "Save Error", f"Failed to save pre-calibrated configuration: {e}"
+            )
+
+    @Slot()
     def exportConfig(self):
         if self.odrive is None:
             return
