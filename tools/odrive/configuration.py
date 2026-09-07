@@ -15,7 +15,9 @@ def obj_to_path(root, obj):
             continue
         try:
             v = getattr(root, k, None)
-        except Exception:
+        except fibre.libfibre.ObjectLostError:
+            # Expected link-gone noise during the walk: skip the node.
+            # Anything else is a bug and surfaces (fork hardening rule).
             continue
         if isinstance(v, fibre.libfibre.RemoteObject):
             if v == obj:
