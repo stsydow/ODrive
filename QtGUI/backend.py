@@ -105,16 +105,25 @@ def _pos_reader(axis, _odrv):
     return float(v) if v is not None else math.nan
 
 
-def _iq_reader(axis, _odrv):
-    return _f(getattr(axis.motor, "current_control", None), "Iq_measured")
+def _cc(attr, axis):
+    """current_control.<attr> as float; NaN when the endpoint is missing."""
+    return _f(getattr(axis.motor, "current_control", None), attr)
+
+
+def _torque_from_iq(iq, axis):
+    tc = getattr(getattr(axis.motor, "config", None), "torque_constant", None)
+    return iq * float(tc) if not math.isnan(iq) and tc is not None else math.nan
 
 
 def _torque_reader(axis, _odrv):
     # Iq is derived by fw from its two measured phase currents; there is no
     # torque endpoint on 0.5.x -> computed as Iq * torque_constant.
-    iq = _iq_reader(axis, None)
-    tc = getattr(getattr(axis.motor, "config", None), "torque_constant", None)
-    return iq * float(tc) if not math.isnan(iq) and tc is not None else math.nan
+    return _torque_from_iq(_cc("Iq_measured", axis), axis)
+
+
+def _tq_cmd_reader(axis, _odrv):
+    # Driven torque in ALL control modes (vel-PI output): Iq_setpoint * tc
+    return _torque_from_iq(_cc("Iq_setpoint", axis), axis)
 
 
 def _adc_reader(gpio):
@@ -139,11 +148,14 @@ _PLOT_READERS = {
     "pos_in": lambda a, d: _f(a.controller, "input_pos"),
     "vel_in": lambda a, d: _f(a.controller, "input_vel"),
     "tq_in": lambda a, d: _f(a.controller, "input_torque"),
-    "iq": _iq_reader,
+    "id": lambda a, d: _cc("Id_measured", a),
+    "iq": lambda a, d: _cc("Iq_measured", a),
+    "iq_sp": lambda a, d: _cc("Iq_setpoint", a),
     "i_a": lambda a, d: _f(a.motor, "current_meas_phA"),
     "i_b": lambda a, d: _f(a.motor, "current_meas_phB"),
     "i_c": lambda a, d: _f(a.motor, "current_meas_phC"),
     "torque": _torque_reader,
+    "tq_cmd": _tq_cmd_reader,
     "p_mech": lambda a, d: _f(a.controller, "mechanical_power"),
     "p_elec": lambda a, d: _f(a.controller, "electrical_power"),
     "vbus": lambda a, d: _f(d, "vbus_voltage"),

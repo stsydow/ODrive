@@ -417,6 +417,13 @@ A step change in setpoint while recording the system response. Not a dashboard f
 
 **Important:** Break-away friction is ~6× larger than running friction (measured manually). They must NOT be conflated. The GUI stores them as separate values.
 
+**Quick field recipe (validated 2026-09-07, live-plot only):**
+1. Run a `VEL_RAMP` at a known rate (e.g. `vel_ramp_rate = 50 rps/s`), both directions.
+2. On the Torque plot, read the **`tq_cmd` ("Driven")** curve mid-ramp, settled (skip first/last ~100 ms of transients).
+3. `J = tq_cmd / ramp_rate` in N·m/(rps/s) — the unit the firmware feed-forward expects (`controller.cpp` `INPUT_MODE_VEL_RAMP`: `torque = (step/period) × inertia`, with velocity in turns/s). Average accel + brake readings; their difference is the running-friction estimate (consistent with the dedicated friction test above).
+
+**What J does / doesn't do:** with `inertia = 0` the whole ramp torque must come from the vel-PI integrator winding up — velocity sags behind the ramp and the integrator carries state into the next transient. With J set, the feed-forward supplies the ramp torque instantly (verify: `tq_cmd` jumps to full ramp torque at ramp start instead of rising behind it). It does NOT suppress the inductive release spike at high speed — that is set by `2·V_max/L` against the BEMF and is covered by the ramp + `current_lim_margin` trip level instead.
+
 **How results are used:**
 - `inertia` → written to `controller.config.inertia` (feed-forward for VEL_RAMP/TRAP_TRAJ). This is a pure GUI/config change — no firmware work.
 - `break_away_friction` and `running_friction` → **consumed by firmware** (start-up torque pulse on moving; friction-compensation torque offset added to `input_torque` in all modes, so the motor actually starts at low pedal positions).
