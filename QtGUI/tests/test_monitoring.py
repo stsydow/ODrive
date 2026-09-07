@@ -6,7 +6,13 @@ import time
 from conftest import MockDevice
 
 from backend import _PLOT_READERS
-from monitoring import BUFFER_SECONDS, CHANNELS, SAMPLE_INTERVAL_MS, SampleBuffer
+from monitoring import (
+    BUFFER_SECONDS,
+    CHANNELS,
+    SAMPLE_INTERVAL_MS,
+    PlotWindow,
+    SampleBuffer,
+)
 
 
 def test_window_slices_trailing_seconds():
@@ -73,3 +79,22 @@ def test_readers_against_mock_device():
         "tq_sp",
     ):
         assert math.isnan(vals[key]), key
+
+
+def test_plot_window_phase_checkbox(backend):
+    """The phase trio shares one box; toggling it shows/hides all three
+    curves (smoke: _update_rows must know a mode for every curve key)."""
+    w = PlotWindow(backend)
+    w._update_rows()
+    box = w._box_for["i_a"]
+    assert box is w._box_for["i_b"] is w._box_for["i_c"]
+    curves = dict(w._group_curves["current"])
+    assert not curves["i_a"].isVisible()
+    box.setChecked(True)
+    w._update_rows()
+    assert all(
+        curves[k].isVisible() for k in ("i_a", "i_b", "i_c")
+    )
+    box.setChecked(False)
+    w._update_rows()
+    assert not curves["i_a"].isVisible()

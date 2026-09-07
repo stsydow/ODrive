@@ -142,6 +142,7 @@ _PLOT_READERS = {
     "iq": _iq_reader,
     "i_a": lambda a, d: _f(a.motor, "current_meas_phA"),
     "i_b": lambda a, d: _f(a.motor, "current_meas_phB"),
+    "i_c": lambda a, d: _f(a.motor, "current_meas_phC"),
     "torque": _torque_reader,
     "p_mech": lambda a, d: _f(a.controller, "mechanical_power"),
     "p_elec": lambda a, d: _f(a.controller, "electrical_power"),

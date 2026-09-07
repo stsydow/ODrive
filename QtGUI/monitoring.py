@@ -52,11 +52,15 @@ CHANNELS = [
     ("iq", "Current Iq", True, "current", None),
     ("i_a", "Current phA", False, "current", None),
     ("i_b", "Current phB", False, "current", None),
+    ("i_c", "Current phC", False, "current", None),
     ("p_mech", "Mech. power", False, "power", None),
     ("p_elec", "Elec. power", True, "power", None),
     ("vbus", "Bus voltage", False, "voltage", None),
     ("adc3", "Input GPIO3", True, "adc", None),
 ]
+
+# The phase trio shares one checkbox (the curves stay per-key for data/CSV).
+_PHASE_KEYS = ("i_a", "i_b", "i_c")
 
 # ~4000 Hz USB transfer ceiling; keep 1/4 as margin
 # SAMPLE_INTERVAL_MS = 1000ms / ( 4000Hz * 3/4 / channel_max); channel_max=15
@@ -177,28 +181,39 @@ class PlotWindow(QWidget):
         assert first is not None  # _GROUPS is non-empty
         self._plot = first
 
-        # One checkbox per channel; unchecked hides the curve AND stops
-        # sampling it (buffer/CSV keep those columns as NaN — see setActive-
-        # Channels). Setpoint/Input curves additionally require their control
-        # mode to be active. A row with no active curve is hidden entirely
-        # (_update_rows).
+        # One checkbox per channel — except the phase trio, which sits behind
+        # a single "Phase currents" box; unchecked hides the curves AND stops
+        # sampling them (buffer/CSV keep those columns as NaN — see
+        # setActiveChannels). Setpoint/Input curves additionally require their
+        # control mode to be active. A row with no active curve is hidden
+        # entirely (_update_rows).
         channel_box = QHBoxLayout()
         group_curves: dict[str, list[tuple[str, pg.PlotDataItem]]] = {
             gid: [] for gid, *_ in _GROUPS
         }
-        self._boxes: dict[str, QCheckBox] = {}
+        self._box_for: dict[str, QCheckBox] = {}
         self._curve_mode: dict[str, int | None] = {}
+        phase_box: QCheckBox | None = None
         for i, (key, label, default_on, group, mode) in enumerate(CHANNELS):
             curve = self._plots[group].plot(
                 pen=pg.intColor(i, len(CHANNELS)), name=label
             )
             group_curves[group].append((key, curve))
-            box = QCheckBox(label)
-            box.setChecked(default_on)
-            box.toggled.connect(lambda _checked: self._update_rows())
-            channel_box.addWidget(box)
-            self._boxes[key] = box
+            if key in _PHASE_KEYS:
+                if phase_box is None:
+                    phase_box = QCheckBox("Phase currents")
+                    phase_box.toggled.connect(
+                        lambda _checked: self._update_rows()
+                    )
+                    channel_box.addWidget(phase_box)
+                box = phase_box
+            else:
+                box = QCheckBox(label)
+                box.setChecked(default_on)
+                box.toggled.connect(lambda _checked: self._update_rows())
+                channel_box.addWidget(box)
             self._curve_mode[key] = mode
+            self._box_for[key] = box
         self._group_curves = group_curves
 
         layout = QVBoxLayout(self)
@@ -245,7 +260,7 @@ class PlotWindow(QWidget):
             any_on = False
             for key, curve in self._group_curves[gid]:
                 ch_mode = self._curve_mode[key]
-                vis = self._boxes[key].isChecked() and ch_mode in (None, mode)
+                vis = self._box_for[key].isChecked() and ch_mode in (None, mode)
                 if curve.isVisible() != vis:
                     curve.setVisible(vis)
                 any_on |= vis
@@ -261,7 +276,7 @@ class PlotWindow(QWidget):
         # (they'd be dead weight — six setpoint/input boxes otherwise).
         for key, ch_mode in self._curve_mode.items():
             if ch_mode is not None:
-                self._boxes[key].setVisible(ch_mode == mode)
+                self._box_for[key].setVisible(ch_mode == mode)
         self._backend.setActiveChannels(active)
         self.refresh()
 
