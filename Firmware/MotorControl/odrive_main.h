@@ -61,7 +61,11 @@ struct PWMMapping_t {
     float deadband_start = 0;
     float deadband_end = 1;
     float deadband_level = 0;
+    bool deadband_idle = false;
 };
+
+Axis* get_axis_from_endpoint(endpoint_ref_t endpoint_ref);
+void apply_mapping_deadband_idle(const struct PWMMapping_t *map, float fraction);
 
 // @brief general user configurable board configuration
 struct BoardConfig_t {

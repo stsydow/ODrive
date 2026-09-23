@@ -50,6 +50,7 @@ void handle_pulse(int channel, uint32_t high_time) {
     );
 
     fibre::set_endpoint_from_float(odrv.config_.pwm_mappings[channel].endpoint, value);
+    apply_mapping_deadband_idle(&odrv.config_.pwm_mappings[channel], fraction);
 }
 
 /**

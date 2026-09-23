@@ -436,6 +436,7 @@ interfaces:
       deadband_start: float32
       deadband_end: float32
       deadband_level: float32
+      deadband_idle: bool
 
   ODrive.Axis:
     c_is_class: True
