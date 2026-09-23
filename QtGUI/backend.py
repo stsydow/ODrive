@@ -975,21 +975,23 @@ class GuiBackend(QObject):
 
     # -- device menu actions -------------------------------------------
 
+    def _save_nvm(self, label: str):
+        """Save config to NVM. ODrive v3 reboots on save, so the resulting
+        disconnect is the expected success — absorb it and log it, so a
+        genuine save failure stays visible in the event log."""
+        self.status_backend.set_conn("\u25cf Rebooting\u2026", "orange", False)
+        try:
+            self.odrive.save_configuration()
+        except (*DEVICE_EXCEPTIONS, AttributeError) as e:
+            self.logEvent("CFG", f"saved {label} to NVM (device rebooting: {e})")
+        else:
+            self.logEvent("CFG", f"saved {label} to NVM")
+
     @Slot()
     def saveConfig(self):
         if self.odrive is None:
             return
-        self.status_backend.set_conn("\u25cf Rebooting\u2026", "orange", False)
-        try:
-            try:
-                self.odrive.save_configuration()
-            except (*DEVICE_EXCEPTIONS, AttributeError):
-                pass  # Saving configuration reboots the device on ODrive v3
-            self.logEvent("CFG", "saved config to NVM")
-        except (*DEVICE_EXCEPTIONS, AttributeError) as e:
-            QMessageBox.critical(
-                None, "Save Error", f"Failed to save configuration: {e}"
-            )
+        self._save_nvm("config")
 
     @Slot()
     def savePreCalibrated(self):
@@ -1017,12 +1019,7 @@ class GuiBackend(QObject):
             axis.motor.config.pre_calibrated = True
             axis.encoder.config.pre_calibrated = True
             self.logEvent("CFG", "marked motor & encoder pre_calibrated = True")
-            self.status_backend.set_conn("\u25cf Rebooting\u2026", "orange", False)
-            try:
-                self.odrive.save_configuration()
-            except (*DEVICE_EXCEPTIONS, AttributeError):
-                pass  # Device rebooting on save
-            self.logEvent("CFG", "saved config to NVM")
+            self._save_nvm("pre-calibrated config")
         except (*DEVICE_EXCEPTIONS, AttributeError) as e:
             QMessageBox.critical(
                 None, "Save Error", f"Failed to save pre-calibrated configuration: {e}"
