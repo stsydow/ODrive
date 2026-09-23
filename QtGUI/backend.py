@@ -221,6 +221,7 @@ class GuiBackend(QObject):
         self._analog_deadband_start = 0.0
         self._analog_deadband_end = 0.0
         self._analog_deadband_level = 0.0
+        self._analog_deadband_idle = False
 
         self.event_log = deque(maxlen=1000)
         self.samples = SampleBuffer()
@@ -343,6 +344,10 @@ class GuiBackend(QObject):
     @Property(float, notify=analogChanged)
     def analogDeadbandLevel(self):
         return self._analog_deadband_level
+
+    @Property(bool, notify=analogChanged)
+    def analogDeadbandIdle(self):
+        return self._analog_deadband_idle
 
     # -- connection lifecycle ------------------------------------------
 
@@ -698,6 +703,7 @@ class GuiBackend(QObject):
                 self._analog_deadband_start = float(mapping.deadband_start)
                 self._analog_deadband_end = float(mapping.deadband_end)
                 self._analog_deadband_level = float(mapping.deadband_level)
+                self._analog_deadband_idle = bool(getattr(mapping, "deadband_idle", False))
             else:
                 self._analog_deadband_available = False
         except DEVICE_EXCEPTIONS:
@@ -743,6 +749,8 @@ class GuiBackend(QObject):
                     new_map.deadband_start = old_map.deadband_start
                     new_map.deadband_end = old_map.deadband_end
                     new_map.deadband_level = old_map.deadband_level
+                    if hasattr(old_map, "deadband_idle") and hasattr(new_map, "deadband_idle"):
+                        new_map.deadband_idle = old_map.deadband_idle
                 old_map.endpoint = None
                 setattr(
                     self.odrive.config, f"gpio{old_gpio}_mode", GPIO_MODE_DIGITAL
@@ -820,6 +828,10 @@ class GuiBackend(QObject):
     @Slot(float)
     def setAnalogDeadbandLevel(self, value):
         self._write_analog_field("deadband_level", value)
+
+    @Slot(bool)
+    def setAnalogDeadbandIdle(self, value):
+        self._write_analog_field("deadband_idle", value)
 
     # -- mode sync / gating --------------------------------------------
 
