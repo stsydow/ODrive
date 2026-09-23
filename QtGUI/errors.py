@@ -90,7 +90,7 @@ def read_error_report(odrv):
         )
 
         report.sources = sources
-    except (DEVICE_EXCEPTIONS, AttributeError):
+    except (*DEVICE_EXCEPTIONS, AttributeError):
         pass
 
     return report
