@@ -72,11 +72,11 @@ int is_in_the_future(uint32_t time_ms);
 uint32_t micros(void);
 void delay_us(uint32_t us);
 float apply_deadband(float fraction,
-    float fraction_min, float level_min,
-    float fraction_max, float level_max,
+    float level_min,
+    float level_max,
     bool deadband_enable,
-    float deadband_start, float deadband_start_level,
-    float deadband_end, float deadband_end_level);
+    float deadband_start,
+    float deadband_end, float deadband_level);
 
 extern "C" {
 float our_arm_sin_f32(float x);

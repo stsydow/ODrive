@@ -57,7 +57,7 @@ osThreadId analog_thread = 0;
 *   Brake resistor PWM:
 *     Timer2.CCR3 (counter compare register 3)
 *     Timer2.CCR4 (counter compare register 4)
-* 
+*
 * The following assumptions are made:
 *   - The hardware operates as described in the datasheet:
 *     http://www.st.com/content/ccc/resource/technical/document/reference_manual/3d/6d/5a/66/b4/99/40/d4/DM00031020.pdf/files/DM00031020.pdf/jcr:content/translations/en.DM00031020.pdf
@@ -334,11 +334,11 @@ void update_brake_current() {
             odrv.disarm_with_error(ODrive::ERROR_INVALID_BRAKE_RESISTANCE);
             return;
         }
-    
+
         // Don't start braking until -Ibus > regen_current_allowed
         brake_current = -Ibus_sum - odrv.config_.max_regen_current;
         brake_duty = brake_current * odrv.config_.brake_resistance / vbus_voltage;
-        
+
         if (odrv.config_.enable_dc_bus_overvoltage_ramp && (odrv.config_.brake_resistance > 0.0f) && (odrv.config_.dc_bus_overvoltage_ramp_start < odrv.config_.dc_bus_overvoltage_ramp_end)) {
             brake_duty += std::max((vbus_voltage - odrv.config_.dc_bus_overvoltage_ramp_start) / (odrv.config_.dc_bus_overvoltage_ramp_end - odrv.config_.dc_bus_overvoltage_ramp_start), 0.0f);
         }
@@ -375,7 +375,7 @@ void update_brake_current() {
         odrv.disarm_with_error(ODrive::ERROR_DC_BUS_OVER_REGEN_CURRENT);
         return;
     }
-    
+
     int high_on = (int)(TIM_APB1_PERIOD_CLOCKS * (1.0f - brake_duty));
     int low_off = high_on - TIM_APB1_DEADTIME_CLOCKS;
     if (low_off < 0) low_off = 0;
@@ -389,10 +389,10 @@ static void update_analog_endpoint(const struct PWMMapping_t *map, int gpio)
 {
     float fraction = get_adc_relative_voltage(get_gpio(gpio));
     float value = apply_deadband(fraction,
-        0.0, map->min,
-        1.0, map->max,
+        map->min,
+        map->max,
         map->deadband_enable,
-        map->deadband_start, map->deadband_level,
+        map->deadband_start,
         map->deadband_end, map->deadband_level
     );
     fibre::set_endpoint_from_float(map->endpoint, value);

@@ -42,10 +42,10 @@ void handle_pulse(int channel, uint32_t high_time) {
         high_time = PWM_MAX_HIGH_TIME;
     float fraction = (float)(high_time - PWM_MIN_HIGH_TIME) / (float)(PWM_MAX_HIGH_TIME - PWM_MIN_HIGH_TIME);
     float value = apply_deadband(fraction,
-        0.0, odrv.config_.pwm_mappings[channel].min,
-        1.0, odrv.config_.pwm_mappings[channel].max,
+        odrv.config_.pwm_mappings[channel].min,
+        odrv.config_.pwm_mappings[channel].max,
         odrv.config_.pwm_mappings[channel].deadband_enable,
-        odrv.config_.pwm_mappings[channel].deadband_start, odrv.config_.pwm_mappings[channel].deadband_level,
+        odrv.config_.pwm_mappings[channel].deadband_start,
         odrv.config_.pwm_mappings[channel].deadband_end, odrv.config_.pwm_mappings[channel].deadband_level
     );
 

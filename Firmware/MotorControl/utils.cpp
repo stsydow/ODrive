@@ -2,7 +2,6 @@
 #include <utils.hpp>
 #include <board.h>
 
-
 // Compute rising edge timings (0.0 - 1.0) as a function of alpha-beta
 // as per the magnitude invariant clarke transform
 // The magnitude of the alpha-beta vector may not be larger than sqrt(3)/2
@@ -189,48 +188,36 @@ void delay_us(uint32_t us)
 }
 
 float apply_deadband(float fraction,
-        float fraction_min, float level_min,
-        float fraction_max, float level_max,
+        float level_min,
+        float level_max,
         bool deadband_enable,
-        float deadband_start, float deadband_start_level,
-        float deadband_end, float deadband_end_level) {
-    float x1, y1, x2, y2;
-    float x = fraction;
+        float deadband_start,
+        float deadband_end, float deadband_level) {
+    deadband_start = std::max(0.0f, deadband_start);
+    deadband_end = std::min(1.0f, deadband_end);
+    if (deadband_start > deadband_end)
+        std::swap(deadband_start, deadband_end); // reversed config: just do what was meant
 
-    if (fraction <= fraction_min)
+    if (fraction <= 0.0f)
         return level_min;
-    else if (fraction >= fraction_max)
+
+    if (fraction >= 1.0f)
         return level_max;
-    else if (!(deadband_enable && 
-               fraction_min <= deadband_start && 
-               deadband_start <= deadband_end && 
-               deadband_end <= fraction_max)) {
-        x1 = fraction_min;
-        x2 = fraction_max;
-        y1 = level_min;
-        y2 = level_max;
-    }
-    else if (x < deadband_start) {
-        x1 = fraction_min;
-        x2 = deadband_start;
-        y1 = level_min;
-        y2 = deadband_start_level;
-    }
-    else if (x <= deadband_end) {
-        x1 = deadband_start;
-        x2 = deadband_end;
-        y1 = deadband_start_level;
-        y2 = deadband_end_level;
-    }
-    else {
-        x1 = deadband_end;
-        x2 = fraction_max;
-        y1 = deadband_end_level;
-        y2 = level_max;
+
+    float x1 = 0.0f, y1 = level_min;
+    float x2 = 1.0f, y2 = level_max;
+
+    if (deadband_enable) {
+        if (fraction >= deadband_start && fraction <= deadband_end)
+            return deadband_level; // start == end: point deadband, valid
+        if (fraction < deadband_start) {
+            x2 = deadband_start;
+            y2 = deadband_level;
+        } else {
+            x1 = deadband_end;
+            y1 = deadband_level;
+        }
     }
 
-    if (x1 >= x2)
-        return (y1 + y2) * 0.5f;
-
-    return y1 + (x - x1) / (x2 - x1) * (y2 - y1);
+    return y1 + (fraction - x1) / (x2 - x1) * (y2 - y1);
 }
